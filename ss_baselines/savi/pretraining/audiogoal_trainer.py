@@ -57,9 +57,10 @@ class AudioGoalPredictorTrainer:
                 use_polar_coordinates=False,
                 use_cache=True
             )
+            #TODO YYZ
             dataloaders[split] = DataLoader(dataset=datasets[split],
                                             batch_size=self.batch_size,
-                                            shuffle=False,
+                                            shuffle=True,
                                             pin_memory=True,
                                             num_workers=self.num_worker,
                                             sampler=None,

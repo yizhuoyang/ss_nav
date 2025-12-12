@@ -6,5 +6,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from ss_baselines.av_nav.ppo.ppo_trainer import PPOTrainer
+# from ss_baselines.av_nav.ppo.ppo_trainer import PPOTrainer
+from ss_baselines.av_nav.ppo.ppo_trainer_ours import PPOTrainer
 from ss_baselines.av_nav.ddppo.ddppo_trainer import DDPPOTrainer

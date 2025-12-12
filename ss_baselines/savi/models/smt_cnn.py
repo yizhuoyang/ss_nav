@@ -86,7 +86,8 @@ class SMTCNN(nn.Module):
 
         if "depth" in self.input_modalities:
             depth_observations = observations["depth"]
-            # permute tensor to dimension [BATCH x CHANNEL x HEIGHT X WIDTH]
+            if depth_observations.ndim == 5:
+                depth_observations = depth_observations.squeeze(-1) 
             depth_observations = depth_observations.permute(0, 3, 1, 2)
             if self.obs_transform:
                 depth_observations = self.obs_transform(depth_observations)

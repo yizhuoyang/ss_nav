@@ -673,12 +673,13 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             None
         """
-        random.seed(self.config.SEED)
-        np.random.seed(self.config.SEED)
-        torch.manual_seed(self.config.SEED)
+        SEED = 100
+        random.seed(SEED)
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
             
         # Map location CPU is almost always better than mapping to a CUDA device.
-        ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
+        ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 
         if self.config.EVAL.USE_CKPT_CONFIG:
             config = self._setup_eval_config(ckpt_dict["config"])
@@ -702,10 +703,12 @@ class PPOTrainer(BaseRLTrainer):
             config.defrost()
             config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
             config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+            config.FOLLOW_SHORTEST_PATH = True
             config.freeze()
         elif "top_down_map" in self.config.VISUALIZATION_OPTION:
             config.defrost()
             config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            config.FOLLOW_SHORTEST_PATH = True
             config.freeze()
 
         logger.info(f"env config: {config}")
@@ -719,6 +722,12 @@ class PPOTrainer(BaseRLTrainer):
         else:
             observation_space = self.envs.observation_spaces[0]
         self._setup_actor_critic_agent(ppo_cfg, observation_space)
+
+        # if config.FOLLOW_SHORTEST_PATH:
+        #     follower = ShortestPathFollower(
+        #         self.envs.workers[0]._env.habitat_env.sim, 0.5, False
+        #     )
+        sim = self.envs.workers[0]._env.habitat_env.sim
 
         self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
@@ -821,12 +830,31 @@ class PPOTrainer(BaseRLTrainer):
 
                 prev_actions.copy_(actions)
 
-            actions = [a[0].item() for a in actions]
+            # if config.FOLLOW_SHORTEST_PATH:
+            #     # TODO
+            oracle_actions = sim.compute_oracle_actions()
+            actions = oracle_actions
+            #
+            # ## Add sensors here
+            # raw_audio = sim.get_current_audiogoal_observation()
+            # ego_map   = sim.get_egomap_observation()
+            # current_scenc = sim._current_scene
+            # actions = [follower.get_next_action(
+            #     self.envs.workers[0]._env.habitat_env.current_episode.goals[0].view_points[0].agent_state.position)]
+            # actions = [follower.get_next_action(sim.graph.nodes[sim._source_position_index]['point'])]
+            logging.info('The Action is {}, the step is {}'.format(actions,len(stats_episodes)))
             outputs = self.envs.step(actions)
+            # else:
+            #     outputs = self.envs.step([a[0].item() for a in actions])
+
+            #
+            # actions = [a[0].item() for a in actions]
+            # outputs = self.envs.step(actions)
 
             observations, rewards, dones, infos = [
                 list(x) for x in zip(*outputs)
             ]
+            print(dones)
             if config.DISPLAY_RESOLUTION != model_resolution:
                 obs_copy = resize_observation(observations, model_resolution)
             else:
@@ -873,7 +901,8 @@ class PPOTrainer(BaseRLTrainer):
                     if "rgb" not in observations[i]:
                         observations[i]["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
                                                            self.config.DISPLAY_RESOLUTION, 3))
-                    frame = observations_to_image(observations[i], infos[i], pred=pred)
+                    # print(infos[i])
+                    frame = observations_to_image(observations[i], infos[i], pred=None)
                     rgb_frames[i].append(frame)
                     audios[i].append(observations[i]['audiogoal'])
 

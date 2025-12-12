@@ -5,7 +5,9 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import sys
+sys.path.append("/media/kemove/data/av_nav/network/audionet")
+from ssl_net_infer import SSLNet
 import os
 import time
 import logging
@@ -13,7 +15,7 @@ from collections import deque
 from typing import Dict, List
 import json
 import random
-
+from habitat.sims.habitat_simulator.actions import HabitatSimActions
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
@@ -39,7 +41,7 @@ from ss_baselines.common.utils import (
 )
 from ss_baselines.av_nav.ppo.policy import AudioNavBaselinePolicy
 from ss_baselines.av_nav.ppo.ppo import PPO
-
+from ss_baselines.av_nav.ppo.ours_utlis import policy_from_heatmap,is_front_1m_free_point,euclidean_distance
 
 @baseline_registry.register_trainer(name="AVNavTrainer")
 class PPOTrainer(BaseRLTrainer):
@@ -419,6 +421,13 @@ class PPOTrainer(BaseRLTrainer):
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
+        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly/last_model.pth'
+        # model = SSLNet(use_compress=False).to(self.device)
+        # ckpt = torch.load(CKPT_PATH, map_location=self.device)
+        # model.load_state_dict(ckpt)
+        # print(f"Loaded checkpoint from {CKPT_PATH}")
+        # model.eval()
+
         if self.config.EVAL.USE_CKPT_CONFIG:
             config = self._setup_eval_config(ckpt_dict["config"])
         else:
@@ -439,8 +448,8 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.FOLLOW_SHORTEST_PATH = True
         config.freeze()
         # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
@@ -458,30 +467,6 @@ class PPOTrainer(BaseRLTrainer):
 
         habitat_env = self.envs.workers[0]._env.habitat_env
         dataset = habitat_env._dataset
-
-        # total_eps = len(dataset.episodes)
-        # print("[DEBUG] total episodes in split:", total_eps)
-
-        # if total_eps <= SKIP_EPISODES:
-        #     print(
-        #         f"[WARN] 数据集中只有 {total_eps} 个 episodes，"
-        #         f"小于或等于 SKIP_EPISODES={SKIP_EPISODES}，无法跳过这么多。"
-        #     )
-        # else:
-        #     # 1) 裁剪 episodes 列表
-        #     dataset.episodes = dataset.episodes[SKIP_EPISODES:]
-        #     print(
-        #         f"[INFO] 裁剪 episodes: 原本 {total_eps}，"
-        #         f"现在 {len(dataset.episodes)} (从原第 {SKIP_EPISODES} 个开始)"
-        #     )
-
-        #     # 2) 直接用新的 episodes 列表重置 _episode_iterator
-        #     if hasattr(habitat_env, "_episode_iterator"):
-        #         habitat_env._episode_iterator = iter(dataset.episodes)
-        #         print("[INFO] 直接用 iter(dataset.episodes) 重建 _episode_iterator")
-        #     else:
-        #         print("[WARN] habitat_env 没有 _episode_iterator 属性，这个版本的内部实现不一样，需要再查一下。")
-
         sim = habitat_env.sim
         #——————————————————————————Code for skip———————————————————————————————————#
 
@@ -496,8 +481,8 @@ class PPOTrainer(BaseRLTrainer):
         self._setup_actor_critic_agent(ppo_cfg, observation_space)
 
         if config.FOLLOW_SHORTEST_PATH:
-            # single_env = self.envs._envs[0]                 
-            # sim = self.envs.workers[0]._env.habitat_env.sim         
+            # single_env = self.envs._envs[0]
+            # sim = self.envs.workers[0]._env.habitat_env.sim
             # follower = ShortestPathFollower(sim, 0.5, False)
             follower = ShortestPathFollower(
                 self.envs.workers[0]._env.habitat_env.sim, 0.5, False
@@ -556,27 +541,106 @@ class PPOTrainer(BaseRLTrainer):
         ):
             current_episodes = self.envs.current_episodes()
 
-            # with torch.no_grad():
-            #     _, actions, _, test_recurrent_hidden_states = self.actor_critic.act(
-            #         batch,
-            #         test_recurrent_hidden_states,
-            #         prev_actions,
-            #         not_done_masks,
-            #         deterministic=False
-            #     )
-
-            #     prev_actions.copy_(actions)
-
             if config.FOLLOW_SHORTEST_PATH:
-                # TODO
-                oracle_actions = sim.compute_oracle_actions()
-                actions = oracle_actions
+                # TODO change the target points here
+                # oracle_actions = sim.compute_oracle_actions()
+                # actions = oracle_actions
+                ## Our network define here
+                # spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
+                # depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
+                # predicted_heatmap = model(spectrogram,depth)
+                # # print(predicted_heatmap.shape)
+                # actions = [policy_from_heatmap(predicted_heatmap.squeeze(0))]
+                # #######################
 
+                ########################### Rule-based ############################
+                audio_wave = observations[0]['audiogoal']
+                ego_map = observations[0]['ego_map']
+                pose_all = observations[0]['pose']
+                state = sim.get_agent_state()
+                current_position = state.position
+                source_loc    = sim.graph.nodes[sim._source_position_index]['point']
+                dist = euclidean_distance(current_position, source_loc)
+                if dist<0.5:
+                    actions = [HabitatSimActions.STOP]
+                else:
+                    if pose_all[-1]==0:
+                        if is_front_1m_free_point(ego_map, map_res=0.1, dist=1.0):
+                            actions = [HabitatSimActions.MOVE_FORWARD]
+                            current_intensity = np.max(np.abs(audio_wave))
+                            last_intensity    = current_intensity
+                            last_actions = actions[0]
+                            print(f"Currnt step is {pose_all[-1]}, the action is forward")
+                        else:
+                            #calculate the intensity of left and right audio
+                            left_intensity  = np.max(np.abs(audio_wave[0]))
+                            right_intensity = np.max(np.abs(audio_wave[1]))
+                            if left_intensity>right_intensity:
+                                actions = [HabitatSimActions.TURN_LEFT]
+                                current_intensity = np.max(np.abs(audio_wave))
+                                last_intensity    = current_intensity
+                                last_actions = actions[0]
+                                print(f"Currnt step is {pose_all[-1]}, the action is left")
+                            else:
+                                actions = [HabitatSimActions.TURN_RIGHT]
+                                current_intensity = np.max(np.abs(audio_wave))
+                                last_intensity    = current_intensity
+                                last_actions = actions[0]
+                                print(f"Currnt step is {pose_all[-1]}, the action is right")
+                    else:
+                        if last_actions == HabitatSimActions.MOVE_FORWARD:
+                            current_intensity = np.max(np.abs(audio_wave))
+                            if current_intensity>last_intensity and is_front_1m_free_point(ego_map, map_res=0.1, dist=1.0):
+                                actions = [HabitatSimActions.MOVE_FORWARD]
+                                current_intensity = np.max(np.abs(audio_wave))
+                                last_intensity    = current_intensity
+                                last_actions = actions[0]
+                                print(f"Currnt step is {pose_all[-1]}, the action is forward")
+                            else:
+                                left_intensity  = np.max(np.abs(audio_wave[0]))
+                                right_intensity = np.max(np.abs(audio_wave[1]))
+                                if left_intensity>right_intensity:
+                                    actions = [HabitatSimActions.TURN_LEFT]
+                                    current_intensity = np.max(np.abs(audio_wave))
+                                    last_intensity    = current_intensity
+                                    last_actions = actions[0]
+                                    print(f"Currnt step is {pose_all[-1]}, the action is left")
+                                else:
+                                    actions = [HabitatSimActions.TURN_RIGHT]
+                                    current_intensity = np.max(np.abs(audio_wave))
+                                    last_intensity    = current_intensity
+                                    last_actions = actions[0]
+                                    print(f"Currnt step is {pose_all[-1]}, the action is right")
+                        else:
+                            if is_front_1m_free_point(ego_map, map_res=0.1, dist=1.0):
+                                actions = [HabitatSimActions.MOVE_FORWARD]
+                                current_intensity = np.max(np.abs(audio_wave))
+                                last_intensity    = current_intensity
+                                last_actions = actions[0]
+                                print(f"Currnt step is {pose_all[-1]}, the action is forward")
+                            else:
+                                left_intensity  = np.max(np.abs(audio_wave[0]))
+                                right_intensity = np.max(np.abs(audio_wave[1]))
+                                if left_intensity>right_intensity:
+                                    actions = [HabitatSimActions.TURN_LEFT]
+                                    current_intensity = np.max(np.abs(audio_wave))
+                                    last_intensity    = current_intensity
+                                    last_actions = actions[0]
+                                    print(f"Currnt step is {pose_all[-1]}, the action is left")
+                                else:
+                                    actions = [HabitatSimActions.TURN_RIGHT]
+                                    current_intensity = np.max(np.abs(audio_wave))
+                                    last_intensity    = current_intensity
+                                    last_actions = actions[0]
+                                    print(f"Currnt step is {pose_all[-1]}, the action is right")
+                ########################### Rule-based ############################
                 ## Add sensors here
-                current_scenc = sim._current_scene
+                # current_scenc = sim._current_scene
                 # print("Current scene:", current_scenc)
                 # logging.info('The Action is {}, the step is {}'.format(actions,len(stats_episodes)))
                 outputs = self.envs.step(actions)
+                # print("Use ours for infer",actions)
+                # print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1")
             else:
                 outputs = self.envs.step([a[0].item() for a in actions])
 
@@ -585,38 +649,38 @@ class PPOTrainer(BaseRLTrainer):
             ]
             ###################### Add the sensor here #####################################
             state = sim.get_agent_state()
-            q = state.rotation
-            q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
-            pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
-            # print(pose_all)
+            # q = state.rotation
+            # q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
+            # pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
+            # # print(pose_all)
             current_scenc = sim._current_scene
-            scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
-            scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
+            # scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
+            # scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-            # source_loc_np = np.array(source_loc)
-            episode_id = current_episodes[0].episode_id
-            folder_name = f"{scene_name}_{episode_id}"
-            save_dir = os.path.join(base_dir, folder_name)
-            os.makedirs(save_dir, exist_ok=True)
-            audio_wave = observations[0]['audiogoal']
-            rgb = observations[0]['rgb']
-            depth = observations[0]['depth'].squeeze(-1)
-            ego_map = observations[0]['ego_map']
-
-            step_idx = pose_all[3]
-            if step_idx !=0:
-                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-                np.savez_compressed(
-                    save_path,
-                    pose_all=pose_all,
-                    rgb=rgb,
-                    depth=depth,
-                    audio_wave=audio_wave,
-                    source_loc=source_loc,
-                    ego_map   = ego_map
-                )
-            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print("The pose is", observations[0]['pose'], state.position, state.rotation)
+            source_loc_np = np.array(source_loc)
+            # episode_id = current_episodes[0].episode_id
+            # folder_name = f"{scene_name}_{episode_id}"
+            # save_dir = os.path.join(base_dir, folder_name)
+            # os.makedirs(save_dir, exist_ok=True)
+            # audio_wave = observations[0]['audiogoal']
+            # rgb = observations[0]['rgb']
+            # depth = observations[0]['depth'].squeeze(-1)
+            # ego_map = observations[0]['ego_map']
+            #
+            # step_idx = pose_all[3]
+            # if step_idx !=0:
+            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+            #     np.savez_compressed(
+            #         save_path,
+            #         pose_all=pose_all,
+            #         rgb=rgb,
+            #         depth=depth,
+            #         audio_wave=audio_wave,
+            #         source_loc=source_loc,
+            #         ego_map   = ego_map
+            #     )
+            # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
+            print(current_scenc,"The pose is",  state.position, state.rotation,source_loc)
             ###################### Add the sensor here #####################################
 
             for i in range(self.envs.num_envs):
@@ -633,7 +697,7 @@ class PPOTrainer(BaseRLTrainer):
                     frame = observations_to_image(observations[i], infos[i])
                     rgb_frames[i].append(frame)
                     audios[i].append(observations[i]['audiogoal'])
-                    print("The pose is", observations[i]['pose'], sim.get_agent_state())
+                    # print("The pose is", observations[i]['pose'], sim.get_agent_state())
 
             if config.DISPLAY_RESOLUTION != model_resolution:
                 resize_observation(observations, model_resolution)
@@ -709,7 +773,7 @@ class PPOTrainer(BaseRLTrainer):
 
                     if "top_down_map" in self.config.VISUALIZATION_OPTION:
                         top_down_map = plot_top_down_map(infos[i],
-                                                         dataset=self.config.TASK_CONFIG.SIMULATOR.SCENE_DATASET)
+                                                         dataset=self.config.TASK_CONFIG.SIMULATOR.SCENE_DATASET,source_world=source_loc)
                         scene = current_episodes[i].scene_id.split('/')[3]
                         writer.add_image('{}_{}_{}/{}'.format(config.EVAL.SPLIT, scene, current_episodes[i].episode_id,
                                                               config.BASE_TASK_CONFIG_PATH.split('/')[-1][:-5]),

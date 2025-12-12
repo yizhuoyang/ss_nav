@@ -227,30 +227,36 @@ def generate_video(
             f"episode{episode_id}", checkpoint_idx, images, fps=fps
         )
 
-
-def plot_top_down_map(info, dataset='replica', pred=None):
+def plot_top_down_map(info, dataset='replica', pred=None, source_world=None):
     top_down_map = info["top_down_map"]["map"]
     top_down_map = maps.colorize_topdown_map(
         top_down_map, info["top_down_map"]["fog_of_war_mask"]
     )
-    map_agent_pos = info["top_down_map"]["agent_map_coord"]
+    map_agent_pos = info["top_down_map"]["agent_map_coord"]  # (row, col) in map
+    print("here")
     if dataset == 'replica':
         agent_radius_px = top_down_map.shape[0] // 16
     else:
         agent_radius_px = top_down_map.shape[0] // 50
+
+    # 画 agent
     top_down_map = maps.draw_agent(
         image=top_down_map,
         agent_center_coord=map_agent_pos,
         agent_rotation=info["top_down_map"]["agent_angle"],
         agent_radius_px=agent_radius_px
     )
+
+    # ====== 1) 你原来的 pred-based 预测点（保留） ======
     if pred is not None:
         from habitat.utils.geometry_utils import quaternion_rotate_vector
 
         source_rotation = info["top_down_map"]["agent_rotation"]
 
         rounded_pred = np.round(pred[1])
+        # pred: [front, right]，转成 agent 坐标系下的 3D 向量
         direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
+        # 旋转到世界坐标
         direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
 
         grid_size = (
@@ -260,20 +266,110 @@ def plot_top_down_map(info, dataset='replica', pred=None):
         delta_x = int(-direction_vector[0] / grid_size[0])
         delta_y = int(direction_vector[2] / grid_size[1])
 
-        x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
-        y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
+        x = int(np.clip(map_agent_pos[0] + delta_x, 0, top_down_map.shape[0] - 1))
+        y = int(np.clip(map_agent_pos[1] + delta_y, 0, top_down_map.shape[1] - 1))
+
         point_padding = 20
         for m in range(x - point_padding, x + point_padding + 1):
             for n in range(y - point_padding, y + point_padding + 1):
-                if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
-                        0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
+                if (
+                    np.linalg.norm(np.array([m - x, n - y])) <= point_padding
+                    and 0 <= m < top_down_map.shape[0]
+                    and 0 <= n < top_down_map.shape[1]
+                ):
+                    # 预测点画成黄色
                     top_down_map[m, n] = (0, 255, 255)
+
         if np.linalg.norm(rounded_pred) < 1:
             assert delta_x == 0 and delta_y == 0
 
+    # ====== 2) 真实 source 位置标注（关键部分） ======
+    if source_world is not None:
+        # source_world: [x, y, z] in world coordinates
+        source_world = np.array(source_world, dtype=np.float32)
+
+        # agent 的世界坐标（你自己根据实际情况替换这个字段）
+        agent_world = np.array(info["top_down_map"]["agent_world_pos"], dtype=np.float32)
+
+        # 计算 source 相对 agent 的位移（世界坐标）
+        rel_vec = source_world - agent_world   # [dx, dy, dz]
+        # 同样用 grid_size 把 metric → pixel offset
+        grid_size = (
+            (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+            (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+        )
+
+        # 注意方向跟 pred 那里保持一致：
+        # world +X → 图像左边，所以用 -rel_vec[0]
+        delta_x = int(-rel_vec[0] / grid_size[0])
+        # world +Z → 图像下方，所以用 +rel_vec[2]
+        delta_y = int(rel_vec[2] / grid_size[1])
+
+        sx = int(np.clip(map_agent_pos[0] + delta_x, 0, top_down_map.shape[0] - 1))
+        sy = int(np.clip(map_agent_pos[1] + delta_y, 0, top_down_map.shape[1] - 1))
+
+        # 画一个小圆点表示真实 source（比如红色）
+        point_padding = 50
+        for m in range(sx - point_padding, sx + point_padding + 1):
+            for n in range(sy - point_padding, sy + point_padding + 1):
+                if (
+                    np.linalg.norm(np.array([m - sx, n - sy])) <= point_padding
+                    and 0 <= m < top_down_map.shape[0]
+                    and 0 <= n < top_down_map.shape[1]
+                ):
+                    top_down_map[m, n] = (255, 0, 0)  # red for GT source
+
+    # 旋转到更直观的方向（你原来的逻辑）
     if top_down_map.shape[0] > top_down_map.shape[1]:
         top_down_map = np.rot90(top_down_map, 1)
+
     return top_down_map
+# def plot_top_down_map(info, dataset='replica', pred=None):
+#     top_down_map = info["top_down_map"]["map"]
+#     top_down_map = maps.colorize_topdown_map(
+#         top_down_map, info["top_down_map"]["fog_of_war_mask"]
+#     )
+#     map_agent_pos = info["top_down_map"]["agent_map_coord"]
+#     if dataset == 'replica':
+#         agent_radius_px = top_down_map.shape[0] // 16
+#     else:
+#         agent_radius_px = top_down_map.shape[0] // 50
+#     top_down_map = maps.draw_agent(
+#         image=top_down_map,
+#         agent_center_coord=map_agent_pos,
+#         agent_rotation=info["top_down_map"]["agent_angle"],
+#         agent_radius_px=agent_radius_px
+#     )
+#     if pred is not None:
+#         from habitat.utils.geometry_utils import quaternion_rotate_vector
+#
+#         source_rotation = info["top_down_map"]["agent_rotation"]
+#
+#         rounded_pred = np.round(pred[1])
+#         direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
+#         direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
+#
+#         grid_size = (
+#             (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+#             (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+#         )
+#         delta_x = int(-direction_vector[0] / grid_size[0])
+#         delta_y = int(direction_vector[2] / grid_size[1])
+#
+#         x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
+#         y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
+#         point_padding = 20
+#         for m in range(x - point_padding, x + point_padding + 1):
+#             for n in range(y - point_padding, y + point_padding + 1):
+#                 if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
+#                         0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
+#                     top_down_map[m, n] = (0, 255, 255)
+#         if np.linalg.norm(rounded_pred) < 1:
+#             assert delta_x == 0 and delta_y == 0
+#
+#     if top_down_map.shape[0] > top_down_map.shape[1]:
+#         top_down_map = np.rot90(top_down_map, 1)
+#     return top_down_map
 
 
 def images_to_video_with_audio(

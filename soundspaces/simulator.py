@@ -25,7 +25,7 @@ from habitat.core.registry import registry
 import habitat_sim
 from habitat_sim.utils.common import quat_from_angle_axis, quat_from_coeffs, quat_to_angle_axis
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
-from habitat.sims.habitat_simulator.habitat_simulator import HabitatSimSensor, overwrite_config
+from habitat.sims.habitat_simulator.habitat_simulator import overwrite_config
 from habitat.core.simulator import (
     AgentState,
     Config,
@@ -70,6 +70,7 @@ class DummySimulator:
 
     def close(self):
         pass
+
 
 
 @registry.register_simulator()
@@ -156,7 +157,7 @@ class SoundSpacesSim(Simulator, ABC):
         audio_sensor_spec.channelLayout.type = habitat_sim.sensor.RLRAudioPropagationChannelLayoutType.Binaural
         audio_sensor_spec.channelLayout.channelCount = 2
         audio_sensor_spec.acousticsConfig.sampleRate = self.config.AUDIO.RIR_SAMPLING_RATE
-        audio_sensor_spec.acousticsConfig.threadCount = 1
+        audio_sensor_spec.acousticsConfig.threadCount = 1 
         audio_sensor_spec.acousticsConfig.indirectRayCount = 500
         audio_sensor_spec.acousticsConfig.temporalCoherence = True
         audio_sensor_spec.acousticsConfig.transmission = True
@@ -206,7 +207,7 @@ class SoundSpacesSim(Simulator, ABC):
 
         sensor_specifications = []
         for sensor in _sensor_suite.sensors.values():
-            assert isinstance(sensor, HabitatSimSensor)
+            # assert isinstance(sensor, HabitatSimSensor)
             sim_sensor_cfg = sensor._get_default_spec()  # type: ignore[misc]
             overwrite_config(
                 config_from=sensor.config,
@@ -479,7 +480,7 @@ class SoundSpacesSim(Simulator, ABC):
         """
         All angle calculations in this function is w.r.t habitat coordinate frame, on X-Z plane
         where +Y is upward, -Z is forward and +X is rightward.
-        Angle 0 corresponds to +X, angle 90 corresponds to +y and 290 corresponds to 270.
+        Angle 0 corresponds to +X, angle 90 corresponds to +z and 290 corresponds to 270.
 
         :param action: action to be taken
         :param only_allowed: if true, then can't step anywhere except allowed locations

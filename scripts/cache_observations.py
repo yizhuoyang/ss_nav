@@ -101,7 +101,7 @@ def main(dataset):
 
 
 if __name__ == '__main__':
-    print('Caching Replica observations ...')
-    main('replica')
+    # print('Caching Replica observations ...')
+    # main('replica')
     print('Caching Matterport3D observations ...')
     main('mp3d')

@@ -19,11 +19,8 @@ import torch
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 from numpy.linalg import norm
-from gym import spaces
 
 from habitat import Config, logger
-from habitat.utils.visualizations.utils import observations_to_image
-from soundspaces.tasks.shortest_path_follower import ShortestPathFollower
 from ss_baselines.common.base_trainer import BaseRLTrainer
 from ss_baselines.common.baseline_registry import baseline_registry
 from ss_baselines.common.env_utils import construct_envs
@@ -34,14 +31,15 @@ from ss_baselines.common.utils import (
     batch_obs,
     generate_video,
     linear_decay,
+    exponential_decay,
     plot_top_down_map,
     resize_observation
 )
-from ss_baselines.av_nav.ppo.policy import AudioNavBaselinePolicy
-from ss_baselines.av_nav.ppo.ppo import PPO
+from ss_baselines.av_wan.ppo import AudioNavBaselinePolicy
+from ss_baselines.av_wan.ppo import PPO
 
 
-@baseline_registry.register_trainer(name="AVNavTrainer")
+@baseline_registry.register_trainer(name="AVWanTrainer")
 class PPOTrainer(BaseRLTrainer):
     r"""Trainer class for PPO algorithm
     Paper: https://arxiv.org/abs/1707.06347.
@@ -69,10 +67,12 @@ class PPOTrainer(BaseRLTrainer):
             observation_space = self.envs.observation_spaces[0]
         self.actor_critic = AudioNavBaselinePolicy(
             observation_space=observation_space,
-            action_space=self.envs.action_spaces[0],
             hidden_size=ppo_cfg.hidden_size,
             goal_sensor_uuid=self.config.TASK_CONFIG.TASK.GOAL_SENSOR_UUID,
-            extra_rgb=self.config.EXTRA_RGB
+            masking=self.config.MASKING,
+            encode_rgb=self.config.ENCODE_RGB,
+            encode_depth=self.config.ENCODE_DEPTH,
+            action_map_size=self.config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE
         )
         self.actor_critic.to(self.device)
 
@@ -116,11 +116,11 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             dict containing checkpoint info
         """
-        return torch.load(checkpoint_path, weights_only = False,*args, **kwargs)
+        return torch.load(checkpoint_path, *args, **kwargs)
 
     def _collect_rollout_step(
-        self, rollouts, current_episode_reward, current_episode_step, episode_rewards,
-            episode_spls, episode_counts, episode_steps
+            self, rollouts, current_episode_reward, current_episode_step, episode_rewards,
+            episode_spls, episode_counts, episode_steps, episode_distances
     ):
         pth_time = 0.0
         env_time = 0.0
@@ -137,19 +137,20 @@ class PPOTrainer(BaseRLTrainer):
                 actions,
                 actions_log_probs,
                 recurrent_hidden_states,
+                distributions
             ) = self.actor_critic.act(
                 step_observation,
                 rollouts.recurrent_hidden_states[rollouts.step],
                 rollouts.prev_actions[rollouts.step],
-                rollouts.masks[rollouts.step],
+                rollouts.masks[rollouts.step]
             )
 
         pth_time += time.time() - t_sample_action
-
         t_step_env = time.time()
 
-        outputs = self.envs.step([a[0].item() for a in actions])
+        outputs = self.envs.step([{"action": a[0].item()} for a in actions])
         observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
+
         logging.debug('Reward: {}'.format(rewards[0]))
 
         env_time += time.time() - t_step_env
@@ -166,6 +167,10 @@ class PPOTrainer(BaseRLTrainer):
             [[info['spl']] for info in infos]
         )
 
+        distances = torch.tensor(
+            [[info['distance_to_goal']] for info in infos]
+        )
+
         current_episode_reward += rewards
         current_episode_step += 1
         # current_episode_reward is accumulating rewards across multiple updates,
@@ -176,6 +181,7 @@ class PPOTrainer(BaseRLTrainer):
         episode_spls += (1 - masks) * spls
         episode_steps += (1 - masks) * current_episode_step
         episode_counts += 1 - masks
+        episode_distances += (1 - masks) * distances
         current_episode_reward *= masks
         current_episode_step *= masks
 
@@ -186,7 +192,7 @@ class PPOTrainer(BaseRLTrainer):
             actions_log_probs,
             values,
             rewards,
-            masks,
+            masks
         )
 
         pth_time += time.time() - t_update_stats
@@ -227,13 +233,14 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             None
         """
+        global lr_lambda
         logger.info(f"config: {self.config}")
         random.seed(self.config.SEED)
         np.random.seed(self.config.SEED)
         torch.manual_seed(self.config.SEED)
 
         self.envs = construct_envs(
-            self.config, get_env_class(self.config.ENV_NAME)
+            self.config, get_env_class(self.config.ENV_NAME), auto_reset_done=False
         )
 
         ppo_cfg = self.config.RL.PPO
@@ -256,7 +263,7 @@ class PPOTrainer(BaseRLTrainer):
             self.envs.num_envs,
             self.envs.observation_spaces[0],
             self.envs.action_spaces[0],
-            ppo_cfg.hidden_size,
+            ppo_cfg.hidden_size
         )
         rollouts.to(self.device)
 
@@ -277,29 +284,42 @@ class PPOTrainer(BaseRLTrainer):
         episode_spls = torch.zeros(self.envs.num_envs, 1)
         episode_steps = torch.zeros(self.envs.num_envs, 1)
         episode_counts = torch.zeros(self.envs.num_envs, 1)
+        episode_distances = torch.zeros(self.envs.num_envs, 1)
         current_episode_reward = torch.zeros(self.envs.num_envs, 1)
         current_episode_step = torch.zeros(self.envs.num_envs, 1)
         window_episode_reward = deque(maxlen=ppo_cfg.reward_window_size)
         window_episode_spl = deque(maxlen=ppo_cfg.reward_window_size)
         window_episode_step = deque(maxlen=ppo_cfg.reward_window_size)
         window_episode_counts = deque(maxlen=ppo_cfg.reward_window_size)
+        window_episode_distances = deque(maxlen=ppo_cfg.reward_window_size)
 
         t_start = time.time()
         env_time = 0
         pth_time = 0
         count_steps = 0
         count_checkpoints = 0
+        start_update = 0
+        prev_time = 0
 
+        if ppo_cfg.use_linear_lr_decay:
+            def lr_lambda(x):
+                return linear_decay(x, self.config.NUM_UPDATES)
+        elif ppo_cfg.use_exponential_lr_decay:
+            def lr_lambda(x):
+                return exponential_decay(x, self.config.NUM_UPDATES, ppo_cfg.exp_decay_lambda)
+        else:
+            def lr_lambda(x):
+                return 1
         lr_scheduler = LambdaLR(
             optimizer=self.agent.optimizer,
-            lr_lambda=lambda x: linear_decay(x, self.config.NUM_UPDATES),
+            lr_lambda=lr_lambda
         )
 
         with TensorboardWriter(
-            self.config.TENSORBOARD_DIR, flush_secs=self.flush_secs
+                self.config.TENSORBOARD_DIR, flush_secs=self.flush_secs
         ) as writer:
-            for update in range(self.config.NUM_UPDATES):
-                if ppo_cfg.use_linear_lr_decay:
+            for update in range(start_update, self.config.NUM_UPDATES):
+                if ppo_cfg.use_linear_lr_decay or ppo_cfg.use_exponential_lr_decay:
                     lr_scheduler.step()
 
                 if ppo_cfg.use_linear_clip_decay:
@@ -307,7 +327,7 @@ class PPOTrainer(BaseRLTrainer):
                         update, self.config.NUM_UPDATES
                     )
 
-                for step in tqdm(range(ppo_cfg.num_steps)):
+                for step in range(ppo_cfg.num_steps):
                     delta_pth_time, delta_env_time, delta_steps = self._collect_rollout_step(
                         rollouts,
                         current_episode_reward,
@@ -315,7 +335,8 @@ class PPOTrainer(BaseRLTrainer):
                         episode_rewards,
                         episode_spls,
                         episode_counts,
-                        episode_steps
+                        episode_steps,
+                        episode_distances
                     )
                     pth_time += delta_pth_time
                     env_time += delta_env_time
@@ -330,11 +351,13 @@ class PPOTrainer(BaseRLTrainer):
                 window_episode_spl.append(episode_spls.clone())
                 window_episode_step.append(episode_steps.clone())
                 window_episode_counts.append(episode_counts.clone())
+                window_episode_distances.append(episode_distances.clone())
 
                 losses = [value_loss, action_loss, dist_entropy]
                 stats = zip(
-                    ["count", "reward", "step", 'spl'],
-                    [window_episode_counts, window_episode_reward, window_episode_step, window_episode_spl],
+                    ["count", "reward", "step", 'spl', 'distance'],
+                    [window_episode_counts, window_episode_reward, window_episode_step, window_episode_spl,
+                     window_episode_distances],
                 )
                 deltas = {
                     k: (
@@ -348,20 +371,47 @@ class PPOTrainer(BaseRLTrainer):
 
                 # this reward is averaged over all the episodes happened during window_size updates
                 # approximately number of steps is window_size * num_steps
-                if update % 10 == 0:
-                    writer.add_scalar("Environment/Reward", deltas["reward"] / deltas["count"], count_steps)
-                    writer.add_scalar("Environment/SPL", deltas["spl"] / deltas["count"], count_steps)
-                    writer.add_scalar("Environment/Episode_length", deltas["step"] / deltas["count"], count_steps)
-                    writer.add_scalar('Policy/Value_Loss', value_loss, count_steps)
-                    writer.add_scalar('Policy/Action_Loss', action_loss, count_steps)
-                    writer.add_scalar('Policy/Entropy', dist_entropy, count_steps)
-                    writer.add_scalar('Policy/Learning_Rate', lr_scheduler.get_lr()[0], count_steps)
+                writer.add_scalar(
+                    "Environment/Reward", deltas["reward"] / deltas["count"], count_steps
+                )
+
+                writer.add_scalar(
+                    "Environment/SPL", deltas["spl"] / deltas["count"], count_steps
+                )
+
+                logging.debug('Number of steps: {}'.format(deltas["step"] / deltas["count"]))
+                writer.add_scalar(
+                    "Environment/Episode_length", deltas["step"] / deltas["count"], count_steps
+                )
+
+                writer.add_scalar(
+                    "Environment/Distance_to_goal", deltas["distance"] / deltas["count"], count_steps
+                )
+
+                # writer.add_scalars(
+                #     "losses",
+                #     {k: l for l, k in zip(losses, ["value", "policy"])},
+                #     count_steps,
+                # )
+
+                writer.add_scalar(
+                    'Policy/Value_Loss', value_loss, count_steps
+                )
+                writer.add_scalar(
+                    'Policy/Action_Loss', action_loss, count_steps
+                )
+                writer.add_scalar(
+                    'Policy/Entropy', dist_entropy, count_steps
+                )
+                writer.add_scalar(
+                    'Policy/Learning_Rate', lr_scheduler.get_lr()[0], count_steps
+                )
 
                 # log stats
                 if update > 0 and update % self.config.LOG_INTERVAL == 0:
                     logger.info(
                         "update: {}\tfps: {:.3f}\t".format(
-                            update, count_steps / (time.time() - t_start)
+                            update, count_steps / ((time.time() - t_start) + prev_time)
                         )
                     )
 
@@ -373,10 +423,10 @@ class PPOTrainer(BaseRLTrainer):
                     )
 
                     window_rewards = (
-                        window_episode_reward[-1] - window_episode_reward[0]
+                            window_episode_reward[-1] - window_episode_reward[0]
                     ).sum()
                     window_counts = (
-                        window_episode_counts[-1] - window_episode_counts[0]
+                            window_episode_counts[-1] - window_episode_counts[0]
                     ).sum()
 
                     if window_counts > 0:
@@ -397,10 +447,10 @@ class PPOTrainer(BaseRLTrainer):
             self.envs.close()
 
     def _eval_checkpoint(
-        self,
-        checkpoint_path: str,
-        writer: TensorboardWriter,
-        checkpoint_index: int = 0
+            self,
+            checkpoint_path: str,
+            writer: TensorboardWriter,
+            checkpoint_index: int = 0
     ) -> Dict:
         r"""Evaluates a single checkpoint.
 
@@ -415,7 +465,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(self.config.SEED)
         np.random.seed(self.config.SEED)
         torch.manual_seed(self.config.SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data/test'
+
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
@@ -437,78 +487,33 @@ class PPOTrainer(BaseRLTrainer):
             model_resolution = self.config.DISPLAY_RESOLUTION
         config.freeze()
 
-        # if len(self.config.VIDEO_OPTION) > 0:
-        config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
-        config.FOLLOW_SHORTEST_PATH = True
-        config.freeze()
-        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-        #     config.defrost()
-        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        #     config.FOLLOW_SHORTEST_PATH = True
-        #     config.freeze()
+        if len(self.config.VIDEO_OPTION) > 0:
+            config.defrost()
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+            config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
+            config.freeze()
+        elif "top_down_map" in self.config.VISUALIZATION_OPTION:
+            config.defrost()
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
-            config, get_env_class(config.ENV_NAME)
+            config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
-        #——————————————————————————Code for skip———————————————————————————————————#
-        SKIP_EPISODES = 0
-
-        habitat_env = self.envs.workers[0]._env.habitat_env
-        dataset = habitat_env._dataset
-
-        # total_eps = len(dataset.episodes)
-        # print("[DEBUG] total episodes in split:", total_eps)
-
-        # if total_eps <= SKIP_EPISODES:
-        #     print(
-        #         f"[WARN] 数据集中只有 {total_eps} 个 episodes，"
-        #         f"小于或等于 SKIP_EPISODES={SKIP_EPISODES}，无法跳过这么多。"
-        #     )
-        # else:
-        #     # 1) 裁剪 episodes 列表
-        #     dataset.episodes = dataset.episodes[SKIP_EPISODES:]
-        #     print(
-        #         f"[INFO] 裁剪 episodes: 原本 {total_eps}，"
-        #         f"现在 {len(dataset.episodes)} (从原第 {SKIP_EPISODES} 个开始)"
-        #     )
-
-        #     # 2) 直接用新的 episodes 列表重置 _episode_iterator
-        #     if hasattr(habitat_env, "_episode_iterator"):
-        #         habitat_env._episode_iterator = iter(dataset.episodes)
-        #         print("[INFO] 直接用 iter(dataset.episodes) 重建 _episode_iterator")
-        #     else:
-        #         print("[WARN] habitat_env 没有 _episode_iterator 属性，这个版本的内部实现不一样，需要再查一下。")
-
-        sim = habitat_env.sim
-        #——————————————————————————Code for skip———————————————————————————————————#
-
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
-            observation_space.spaces['depth'] = spaces.Box(low=0, high=1, shape=(model_resolution,
-                                                           model_resolution, 1), dtype=np.uint8)
-            observation_space.spaces['rgb'] = spaces.Box(low=0, high=1, shape=(model_resolution,
-                                                         model_resolution, 3), dtype=np.uint8)
+            observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
+            observation_space.spaces['rgb'].shape = (model_resolution, model_resolution, 3)
         else:
             observation_space = self.envs.observation_spaces[0]
-        self._setup_actor_critic_agent(ppo_cfg, observation_space)
+        self._setup_actor_critic_agent(ppo_cfg)
 
-        if config.FOLLOW_SHORTEST_PATH:
-            # single_env = self.envs._envs[0]                 
-            # sim = self.envs.workers[0]._env.habitat_env.sim         
-            # follower = ShortestPathFollower(sim, 0.5, False)
-            follower = ShortestPathFollower(
-                self.envs.workers[0]._env.habitat_env.sim, 0.5, False
-            )
-            # oracle_actions = sim.compute_oracle_actions()
-
-        # self.agent.load_state_dict(ckpt_dict["state_dict"])
+        self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
 
         self.metric_uuids = []
-        # get name of performance metric, e.g. "spl"
         for metric_name in self.config.TASK_CONFIG.TASK.MEASUREMENTS:
             metric_cfg = getattr(self.config.TASK_CONFIG.TASK, metric_name)
             measure_type = baseline_registry.get_measure(metric_cfg.TYPE)
@@ -525,6 +530,15 @@ class PPOTrainer(BaseRLTrainer):
         current_episode_reward = torch.zeros(
             self.envs.num_envs, 1, device=self.device
         )
+        current_episode_reaching_waypoint = torch.zeros(
+            self.envs.num_envs, 1, device=self.device
+        )
+        current_episode_cant_reach_waypoint = torch.zeros(
+            self.envs.num_envs, 1, device=self.device
+        )
+        current_episode_step_count = torch.zeros(
+            self.envs.num_envs, 1, device=self.device
+        )
 
         test_recurrent_hidden_states = torch.zeros(
             self.actor_critic.net.num_recurrent_layers,
@@ -533,7 +547,7 @@ class PPOTrainer(BaseRLTrainer):
             device=self.device,
         )
         prev_actions = torch.zeros(
-            self.config.NUM_PROCESSES, 1, device=self.device, dtype=torch.long
+            self.config.NUM_PROCESSES, 2, device=self.device, dtype=torch.long
         )
         not_done_masks = torch.zeros(
             self.config.NUM_PROCESSES, 1, device=self.device
@@ -551,117 +565,61 @@ class PPOTrainer(BaseRLTrainer):
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
         while (
-            len(stats_episodes) < self.config.TEST_EPISODE_COUNT
-            and self.envs.num_envs > 0
+                len(stats_episodes) < self.config.TEST_EPISODE_COUNT
+                and self.envs.num_envs > 0
         ):
             current_episodes = self.envs.current_episodes()
 
-            # with torch.no_grad():
-            #     _, actions, _, test_recurrent_hidden_states = self.actor_critic.act(
-            #         batch,
-            #         test_recurrent_hidden_states,
-            #         prev_actions,
-            #         not_done_masks,
-            #         deterministic=False
-            #     )
-
-            #     prev_actions.copy_(actions)
-
-            if config.FOLLOW_SHORTEST_PATH:
-                # TODO
-                oracle_actions = sim.compute_oracle_actions()
-                actions = oracle_actions
-
-                ## Add sensors here
-                current_scenc = sim._current_scene
-                # print("Current scene:", current_scenc)
-                # logging.info('The Action is {}, the step is {}'.format(actions,len(stats_episodes)))
-                outputs = self.envs.step(actions)
-            else:
-                outputs = self.envs.step([a[0].item() for a in actions])
-
-            observations, rewards, dones, infos = [
-                list(x) for x in zip(*outputs)
-            ]
-            ###################### Add the sensor here #####################################
-            state = sim.get_agent_state()
-            q = state.rotation
-            q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
-            pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
-            # print(pose_all)
-            current_scenc = sim._current_scene
-            scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
-            scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
-            source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-            # source_loc_np = np.array(source_loc)
-            episode_id = current_episodes[0].episode_id
-            folder_name = f"{scene_name}_{episode_id}"
-            save_dir = os.path.join(base_dir, folder_name)
-            os.makedirs(save_dir, exist_ok=True)
-            audio_wave = observations[0]['audiogoal']
-            rgb = observations[0]['rgb']
-            depth = observations[0]['depth'].squeeze(-1)
-            ego_map = observations[0]['ego_map']
-
-            step_idx = pose_all[3]
-            if step_idx !=0:
-                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-                np.savez_compressed(
-                    save_path,
-                    pose_all=pose_all,
-                    rgb=rgb,
-                    depth=depth,
-                    audio_wave=audio_wave,
-                    source_loc=source_loc,
-                    ego_map   = ego_map
+            with torch.no_grad():
+                _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
+                    batch,
+                    test_recurrent_hidden_states,
+                    prev_actions,
+                    not_done_masks,
+                    deterministic=True
                 )
-            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print("The pose is", observations[0]['pose'], state.position, state.rotation)
-            ###################### Add the sensor here #####################################
 
-            for i in range(self.envs.num_envs):
-                if len(self.config.VIDEO_OPTION) > 0:
-                    if config.TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE and 'intermediate' in observations[i]:
-                        for observation in observations[i]['intermediate']:
-                            frame = observations_to_image(observation, infos[i])
-                            rgb_frames[i].append(frame)
-                        del observations[i]['intermediate']
+                prev_actions.copy_(actions)
 
-                    if "rgb" not in observations[i]:
-                        observations[i]["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
-                                                           self.config.DISPLAY_RESOLUTION, 3))
-                    frame = observations_to_image(observations[i], infos[i])
-                    rgb_frames[i].append(frame)
-                    audios[i].append(observations[i]['audiogoal'])
-                    print("The pose is", observations[i]['pose'], sim.get_agent_state())
-
+            outputs = self.envs.step([{"action": a[0].item()} for a in actions])
+            observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
             if config.DISPLAY_RESOLUTION != model_resolution:
                 resize_observation(observations, model_resolution)
+
             batch = batch_obs(observations, self.device)
+            if len(self.config.VIDEO_OPTION) > 0:
+                rgb_frames[0] += infos[0]['rgb_frames']
+                audios[0] += infos[0]['audios']
 
             not_done_masks = torch.tensor(
                 [[0.0] if done else [1.0] for done in dones],
                 dtype=torch.float,
                 device=self.device,
             )
+            logging.debug('Reward: {}'.format(rewards[0]))
 
             rewards = torch.tensor(
                 rewards, dtype=torch.float, device=self.device
             ).unsqueeze(1)
             current_episode_reward += rewards
+            current_episode_step_count += 1
             next_episodes = self.envs.current_episodes()
+            n_envs = self.envs.num_envs
             envs_to_pause = []
-            for i in range(self.envs.num_envs):
+            for i in range(n_envs):
                 # pause envs which runs out of episodes
                 if (
-                    next_episodes[i].scene_id,
-                    next_episodes[i].episode_id,
+                        next_episodes[i].scene_id,
+                        next_episodes[i].episode_id,
                 ) in stats_episodes:
                     envs_to_pause.append(i)
+                    logging.info('Pause env {} and remaining number of envs: {}'.format(i, self.envs.num_envs))
+
+                current_episode_reaching_waypoint[i] += infos[i]['reaching_waypoint']
+                current_episode_cant_reach_waypoint[i] += infos[i]['cant_reach_waypoint']
 
                 # episode ended
                 if not_done_masks[i].item() == 0:
-                    print(f"End of episode {current_scenc}_{current_episodes[i].episode_id}_{current_episodes[i].goals[0].position}__{current_episodes[i].start_position}")
                     episode_stats = dict()
                     for metric_uuid in self.metric_uuids:
                         episode_stats[metric_uuid] = infos[i][metric_uuid]
@@ -669,8 +627,15 @@ class PPOTrainer(BaseRLTrainer):
                     episode_stats['geodesic_distance'] = current_episodes[i].info['geodesic_distance']
                     episode_stats['euclidean_distance'] = norm(np.array(current_episodes[i].goals[0].position) -
                                                                np.array(current_episodes[i].start_position))
-                    logging.debug(episode_stats)
+                    episode_stats["reaching_waypoint"] = current_episode_reaching_waypoint[i].item() / \
+                                                         current_episode_step_count[i].item()
+                    episode_stats["cant_reach_waypoint"] = current_episode_cant_reach_waypoint[i].item() / \
+                                                           current_episode_step_count[i].item()
+                    current_episode_reaching_waypoint[i] = 0
+                    current_episode_cant_reach_waypoint[i] = 0
+                    current_episode_step_count[i] = 0
                     current_episode_reward[i] = 0
+                    logging.debug(episode_stats)
                     # use scene_id + episode_id as unique id for storing stats
                     stats_episodes[
                         (
@@ -681,36 +646,37 @@ class PPOTrainer(BaseRLTrainer):
                     t.update()
 
                     if len(self.config.VIDEO_OPTION) > 0:
-                        fps = int(1 / self.config.TASK_CONFIG.SIMULATOR.STEP_TIME)
-                        if 'sound' in current_episodes[i].info:
-                            sound = current_episodes[i].info['sound']
+                        if self.config.VISUALIZE_FAILURE_ONLY and infos[i]['success'] > 0:
+                            pass
                         else:
-                            sound = current_episodes[i].sound_id.split('/')[1][:-4]
-                        generate_video(
-                            video_option=self.config.VIDEO_OPTION,
-                            video_dir=self.config.VIDEO_DIR,
-                            images=rgb_frames[i][:-1],
-                            scene_name=current_episodes[i].scene_id.split('/')[3],
-                            sound=sound,
-                            sr=self.config.TASK_CONFIG.SIMULATOR.AUDIO.RIR_SAMPLING_RATE,
-                            episode_id=current_episodes[i].episode_id,
-                            checkpoint_idx=checkpoint_index,
-                            metric_name='spl',
-                            metric_value=infos[i]['spl'],
-                            tb_writer=writer,
-                            audios=audios[i][:-1],
-                            fps=fps
-                        )
+                            fps = self.config.TASK_CONFIG.SIMULATOR.VIEW_CHANGE_FPS \
+                                if self.config.TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE else 1
+                            if 'sound' in current_episodes[i].info:
+                                sound = current_episodes[i].info['sound']
+                            else:
+                                sound = current_episodes[i].sound_id.split('/')[1][:-4]
+                            generate_video(
+                                video_option=self.config.VIDEO_OPTION,
+                                video_dir=self.config.VIDEO_DIR,
+                                images=rgb_frames[i][:-1],
+                                scene_name=current_episodes[i].scene_id.split('/')[3],
+                                sound=sound,
+                                sr=self.config.TASK_CONFIG.SIMULATOR.AUDIO.RIR_SAMPLING_RATE,
+                                episode_id=current_episodes[i].episode_id,
+                                checkpoint_idx=checkpoint_index,
+                                metric_name='spl',
+                                metric_value=infos[i]['spl'],
+                                tb_writer=writer,
+                                audios=audios[i][:-1],
+                                fps=fps
+                            )
 
-                        # observations has been reset but info has not
-                        # to be consistent, do not use the last frame
                         rgb_frames[i] = []
                         audios[i] = []
 
                     if "top_down_map" in self.config.VISUALIZATION_OPTION:
-                        top_down_map = plot_top_down_map(infos[i],
-                                                         dataset=self.config.TASK_CONFIG.SIMULATOR.SCENE_DATASET)
-                        scene = current_episodes[i].scene_id.split('/')[3]
+                        top_down_map = plot_top_down_map(infos[i])
+                        scene = current_episodes[i].scene_id.split('/')[-3]
                         writer.add_image('{}_{}_{}/{}'.format(config.EVAL.SPLIT, scene, current_episodes[i].episode_id,
                                                               config.BASE_TASK_CONFIG_PATH.split('/')[-1][:-5]),
                                          top_down_map,
@@ -735,7 +701,6 @@ class PPOTrainer(BaseRLTrainer):
                 rgb_frames,
             )
 
-
         aggregated_stats = dict()
         for stat_key in next(iter(stats_episodes.values())).keys():
             aggregated_stats[stat_key] = sum(
@@ -749,11 +714,15 @@ class PPOTrainer(BaseRLTrainer):
             json.dump(new_stats_episodes, fo)
 
         episode_reward_mean = aggregated_stats["reward"] / num_episodes
+        episode_reaching_waypoint_mean = aggregated_stats["reaching_waypoint"] / num_episodes
+        episode_cant_reach_waypoint_mean = aggregated_stats["cant_reach_waypoint"] / num_episodes
         episode_metrics_mean = {}
         for metric_uuid in self.metric_uuids:
             episode_metrics_mean[metric_uuid] = aggregated_stats[metric_uuid] / num_episodes
 
         logger.info(f"Average episode reward: {episode_reward_mean:.6f}")
+        logger.info(f"Average episode reaching_waypoint: {episode_reaching_waypoint_mean:.6f}")
+        logger.info(f"Average episode cant_reach_waypoint: {episode_cant_reach_waypoint_mean:.6f}")
         for metric_uuid in self.metric_uuids:
             logger.info(
                 f"Average episode {metric_uuid}: {episode_metrics_mean[metric_uuid]:.6f}"
@@ -761,6 +730,10 @@ class PPOTrainer(BaseRLTrainer):
 
         if not config.EVAL.SPLIT.startswith('test'):
             writer.add_scalar("{}/reward".format(config.EVAL.SPLIT), episode_reward_mean, checkpoint_index)
+            writer.add_scalar("{}/reaching_waypoint".format(config.EVAL.SPLIT), episode_reaching_waypoint_mean,
+                              checkpoint_index)
+            writer.add_scalar("{}/cant_reach_waypoint".format(config.EVAL.SPLIT), episode_cant_reach_waypoint_mean,
+                              checkpoint_index)
             for metric_uuid in self.metric_uuids:
                 writer.add_scalar(f"{config.EVAL.SPLIT}/{metric_uuid}", episode_metrics_mean[metric_uuid],
                                   checkpoint_index)
@@ -768,7 +741,9 @@ class PPOTrainer(BaseRLTrainer):
         self.envs.close()
 
         result = {
-            'episode_reward_mean': episode_reward_mean
+            'episode_reward_mean': episode_reward_mean,
+            'episode_reaching_waypoint_mean': episode_reaching_waypoint_mean,
+            'episode_cant_reach_waypoint_mean': episode_cant_reach_waypoint_mean
         }
         for metric_uuid in self.metric_uuids:
             result['episode_{}_mean'.format(metric_uuid)] = episode_metrics_mean[metric_uuid]

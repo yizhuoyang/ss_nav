@@ -415,7 +415,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(self.config.SEED)
         np.random.seed(self.config.SEED)
         torch.manual_seed(self.config.SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data/test'
+        base_dir = '/home/Disk/sound-space/ssl_data/train'
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
@@ -453,38 +453,6 @@ class PPOTrainer(BaseRLTrainer):
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME)
         )
-        #——————————————————————————Code for skip———————————————————————————————————#
-        SKIP_EPISODES = 0
-
-        habitat_env = self.envs.workers[0]._env.habitat_env
-        dataset = habitat_env._dataset
-
-        # total_eps = len(dataset.episodes)
-        # print("[DEBUG] total episodes in split:", total_eps)
-
-        # if total_eps <= SKIP_EPISODES:
-        #     print(
-        #         f"[WARN] 数据集中只有 {total_eps} 个 episodes，"
-        #         f"小于或等于 SKIP_EPISODES={SKIP_EPISODES}，无法跳过这么多。"
-        #     )
-        # else:
-        #     # 1) 裁剪 episodes 列表
-        #     dataset.episodes = dataset.episodes[SKIP_EPISODES:]
-        #     print(
-        #         f"[INFO] 裁剪 episodes: 原本 {total_eps}，"
-        #         f"现在 {len(dataset.episodes)} (从原第 {SKIP_EPISODES} 个开始)"
-        #     )
-
-        #     # 2) 直接用新的 episodes 列表重置 _episode_iterator
-        #     if hasattr(habitat_env, "_episode_iterator"):
-        #         habitat_env._episode_iterator = iter(dataset.episodes)
-        #         print("[INFO] 直接用 iter(dataset.episodes) 重建 _episode_iterator")
-        #     else:
-        #         print("[WARN] habitat_env 没有 _episode_iterator 属性，这个版本的内部实现不一样，需要再查一下。")
-
-        sim = habitat_env.sim
-        #——————————————————————————Code for skip———————————————————————————————————#
-
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
             observation_space.spaces['depth'] = spaces.Box(low=0, high=1, shape=(model_resolution,
@@ -503,8 +471,8 @@ class PPOTrainer(BaseRLTrainer):
                 self.envs.workers[0]._env.habitat_env.sim, 0.5, False
             )
             # oracle_actions = sim.compute_oracle_actions()
-
-        # self.agent.load_state_dict(ckpt_dict["state_dict"])
+        sim = self.envs.workers[0]._env.habitat_env.sim
+        self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
 
         self.metric_uuids = []
@@ -588,7 +556,6 @@ class PPOTrainer(BaseRLTrainer):
             q = state.rotation
             q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
             pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
-            # print(pose_all)
             current_scenc = sim._current_scene
             scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
             scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
@@ -615,8 +582,8 @@ class PPOTrainer(BaseRLTrainer):
                     source_loc=source_loc,
                     ego_map   = ego_map
                 )
-            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print("The pose is", observations[0]['pose'], state.position, state.rotation)
+            # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
+            # print("The pose is", observations[0]['pose'], state.position, state.rotation)
             ###################### Add the sensor here #####################################
 
             for i in range(self.envs.num_envs):

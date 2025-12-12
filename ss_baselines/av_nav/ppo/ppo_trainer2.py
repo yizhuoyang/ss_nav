@@ -415,7 +415,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(self.config.SEED)
         np.random.seed(self.config.SEED)
         torch.manual_seed(self.config.SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data/test'
+            
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
@@ -437,54 +437,22 @@ class PPOTrainer(BaseRLTrainer):
             model_resolution = self.config.DISPLAY_RESOLUTION
         config.freeze()
 
-        # if len(self.config.VIDEO_OPTION) > 0:
-        config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
-        config.FOLLOW_SHORTEST_PATH = True
-        config.freeze()
-        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-        #     config.defrost()
-        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        #     config.FOLLOW_SHORTEST_PATH = True
-        #     config.freeze()
+        if len(self.config.VIDEO_OPTION) > 0:
+            config.defrost()
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+            config.FOLLOW_SHORTEST_PATH = True
+            config.freeze()
+        elif "top_down_map" in self.config.VISUALIZATION_OPTION:
+            config.defrost()
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            config.FOLLOW_SHORTEST_PATH = True
+            config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME)
         )
-        #——————————————————————————Code for skip———————————————————————————————————#
-        SKIP_EPISODES = 0
-
-        habitat_env = self.envs.workers[0]._env.habitat_env
-        dataset = habitat_env._dataset
-
-        # total_eps = len(dataset.episodes)
-        # print("[DEBUG] total episodes in split:", total_eps)
-
-        # if total_eps <= SKIP_EPISODES:
-        #     print(
-        #         f"[WARN] 数据集中只有 {total_eps} 个 episodes，"
-        #         f"小于或等于 SKIP_EPISODES={SKIP_EPISODES}，无法跳过这么多。"
-        #     )
-        # else:
-        #     # 1) 裁剪 episodes 列表
-        #     dataset.episodes = dataset.episodes[SKIP_EPISODES:]
-        #     print(
-        #         f"[INFO] 裁剪 episodes: 原本 {total_eps}，"
-        #         f"现在 {len(dataset.episodes)} (从原第 {SKIP_EPISODES} 个开始)"
-        #     )
-
-        #     # 2) 直接用新的 episodes 列表重置 _episode_iterator
-        #     if hasattr(habitat_env, "_episode_iterator"):
-        #         habitat_env._episode_iterator = iter(dataset.episodes)
-        #         print("[INFO] 直接用 iter(dataset.episodes) 重建 _episode_iterator")
-        #     else:
-        #         print("[WARN] habitat_env 没有 _episode_iterator 属性，这个版本的内部实现不一样，需要再查一下。")
-
-        sim = habitat_env.sim
-        #——————————————————————————Code for skip———————————————————————————————————#
-
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
             observation_space.spaces['depth'] = spaces.Box(low=0, high=1, shape=(model_resolution,
@@ -503,8 +471,8 @@ class PPOTrainer(BaseRLTrainer):
                 self.envs.workers[0]._env.habitat_env.sim, 0.5, False
             )
             # oracle_actions = sim.compute_oracle_actions()
-
-        # self.agent.load_state_dict(ckpt_dict["state_dict"])
+        sim = self.envs.workers[0]._env.habitat_env.sim
+        self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
 
         self.metric_uuids = []
@@ -556,16 +524,16 @@ class PPOTrainer(BaseRLTrainer):
         ):
             current_episodes = self.envs.current_episodes()
 
-            # with torch.no_grad():
-            #     _, actions, _, test_recurrent_hidden_states = self.actor_critic.act(
-            #         batch,
-            #         test_recurrent_hidden_states,
-            #         prev_actions,
-            #         not_done_masks,
-            #         deterministic=False
-            #     )
+            with torch.no_grad():
+                _, actions, _, test_recurrent_hidden_states = self.actor_critic.act(
+                    batch,
+                    test_recurrent_hidden_states,
+                    prev_actions,
+                    not_done_masks,
+                    deterministic=False
+                )
 
-            #     prev_actions.copy_(actions)
+                prev_actions.copy_(actions)
 
             if config.FOLLOW_SHORTEST_PATH:
                 # TODO
@@ -574,8 +542,12 @@ class PPOTrainer(BaseRLTrainer):
 
                 ## Add sensors here
                 current_scenc = sim._current_scene
-                # print("Current scene:", current_scenc)
-                # logging.info('The Action is {}, the step is {}'.format(actions,len(stats_episodes)))
+                print("Current scene:", current_scenc)
+                # print(current_scenc,ego_map.shape, raw_audio.shape)
+                # actions = [follower.get_next_action(
+                #     self.envs.workers[0]._env.habitat_env.current_episode.goals[0].view_points[0].agent_state.position)]
+                # actions = [follower.get_next_action(sim.graph.nodes[sim._source_position_index]['point'])]
+                logging.info('The Action is {}, the step is {}'.format(actions,len(stats_episodes)))
                 outputs = self.envs.step(actions)
             else:
                 outputs = self.envs.step([a[0].item() for a in actions])
@@ -583,42 +555,6 @@ class PPOTrainer(BaseRLTrainer):
             observations, rewards, dones, infos = [
                 list(x) for x in zip(*outputs)
             ]
-            ###################### Add the sensor here #####################################
-            state = sim.get_agent_state()
-            q = state.rotation
-            q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
-            pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
-            # print(pose_all)
-            current_scenc = sim._current_scene
-            scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
-            scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
-            source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-            # source_loc_np = np.array(source_loc)
-            episode_id = current_episodes[0].episode_id
-            folder_name = f"{scene_name}_{episode_id}"
-            save_dir = os.path.join(base_dir, folder_name)
-            os.makedirs(save_dir, exist_ok=True)
-            audio_wave = observations[0]['audiogoal']
-            rgb = observations[0]['rgb']
-            depth = observations[0]['depth'].squeeze(-1)
-            ego_map = observations[0]['ego_map']
-
-            step_idx = pose_all[3]
-            if step_idx !=0:
-                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-                np.savez_compressed(
-                    save_path,
-                    pose_all=pose_all,
-                    rgb=rgb,
-                    depth=depth,
-                    audio_wave=audio_wave,
-                    source_loc=source_loc,
-                    ego_map   = ego_map
-                )
-            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print("The pose is", observations[0]['pose'], state.position, state.rotation)
-            ###################### Add the sensor here #####################################
-
             for i in range(self.envs.num_envs):
                 if len(self.config.VIDEO_OPTION) > 0:
                     if config.TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE and 'intermediate' in observations[i]:
@@ -633,7 +569,7 @@ class PPOTrainer(BaseRLTrainer):
                     frame = observations_to_image(observations[i], infos[i])
                     rgb_frames[i].append(frame)
                     audios[i].append(observations[i]['audiogoal'])
-                    print("The pose is", observations[i]['pose'], sim.get_agent_state())
+                    print("The pose is", observations[i]['pose'])
 
             if config.DISPLAY_RESOLUTION != model_resolution:
                 resize_observation(observations, model_resolution)
@@ -661,7 +597,6 @@ class PPOTrainer(BaseRLTrainer):
 
                 # episode ended
                 if not_done_masks[i].item() == 0:
-                    print(f"End of episode {current_scenc}_{current_episodes[i].episode_id}_{current_episodes[i].goals[0].position}__{current_episodes[i].start_position}")
                     episode_stats = dict()
                     for metric_uuid in self.metric_uuids:
                         episode_stats[metric_uuid] = infos[i][metric_uuid]
@@ -734,7 +669,6 @@ class PPOTrainer(BaseRLTrainer):
                 batch,
                 rgb_frames,
             )
-
 
         aggregated_stats = dict()
         for stat_key in next(iter(stats_episodes.values())).keys():

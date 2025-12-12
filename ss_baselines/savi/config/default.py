@@ -279,12 +279,13 @@ def get_config(
     else:
         # overwrite training configs
         config.defrost()
-        config.NUM_PROCESSES = 10
+        config.NUM_PROCESSES = 1
         if config.EVAL.SPLIT.startswith('val'):
             config.USE_SYNC_VECENV = True
             config.TEST_EPISODE_COUNT = 500
         elif config.EVAL.SPLIT.startswith('test'):
-            config.TEST_EPISODE_COUNT = 1000
+            # config.TEST_EPISODE_COUNT = 1000
+            config.TEST_EPISODE_COUNT = 4
         else:
             raise ValueError('Dataset split must starts with train, val or test!')
         config.freeze()

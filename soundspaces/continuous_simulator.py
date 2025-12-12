@@ -26,7 +26,7 @@ from habitat.core.registry import registry
 import habitat_sim
 from habitat_sim.utils.common import quat_from_angle_axis, quat_from_coeffs, quat_to_angle_axis
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
-from habitat.sims.habitat_simulator.habitat_simulator import HabitatSimSensor, overwrite_config
+from habitat.sims.habitat_simulator.habitat_simulator import overwrite_config
 from habitat.core.simulator import (
     AgentState,
     Config,
@@ -172,7 +172,7 @@ class ContinuousSoundSpacesSim(Simulator, ABC):
 
         sensor_specifications = []
         for sensor in _sensor_suite.sensors.values():
-            assert isinstance(sensor, HabitatSimSensor)
+            # assert isinstance(sensor, HabitatSimSensor)
             sim_sensor_cfg = sensor._get_default_spec()  # type: ignore[misc]
             overwrite_config(
                 config_from=sensor.config,

@@ -56,7 +56,7 @@ def construct_envs(
         scenes = scenes_new
 
     if len(scenes) > 0:
-        # random.shuffle(scenes)
+        random.shuffle(scenes)
         assert len(scenes) >= num_processes, (
             "reduce the number of processes as there "
             "aren't enough number of scenes"
@@ -92,7 +92,8 @@ def construct_envs(
         env_launcher = SyncVectorEnv
         logging.info('Using SyncVectorEnv')
     elif config.USE_VECENV:
-        env_launcher = habitat.VectorEnv
+        # env_launcher = habitat.VectorEnv
+        env_launcher = SyncVectorEnv
         logging.info('Using VectorEnv')
     else:
         env_launcher = habitat.ThreadedVectorEnv

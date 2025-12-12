@@ -5,14 +5,11 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
 from typing import Tuple
 import logging
-
 import torch.nn as nn
 import torch
 import numpy as np
-
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
 
 

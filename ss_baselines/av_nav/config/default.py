@@ -12,7 +12,7 @@ import logging
 import shutil
 
 import numpy as np
-
+from habitat.config.default import SIMULATOR_SENSOR
 from habitat import get_config as get_task_config
 from habitat.config import Config as CN
 import habitat
@@ -99,7 +99,18 @@ _TC.defrost()
 # -----------------------------------------------------------------------------
 _TC.TASK.AUDIOGOAL_SENSOR = CN()
 _TC.TASK.AUDIOGOAL_SENSOR.TYPE = "AudioGoalSensor"
+
+# pose sensor
+_TC.TASK.POSE_SENSOR = CN()
+_TC.TASK.POSE_SENSOR.TYPE = "PoseSensor"
 # -----------------------------------------------------------------------------
+# Egocentric occupancy map projected from depth image
+_TC.TASK.EGOMAP_SENSOR = SIMULATOR_SENSOR.clone()
+_TC.TASK.EGOMAP_SENSOR.TYPE = "EgoMap"
+_TC.TASK.EGOMAP_SENSOR.MAP_SIZE = 31
+_TC.TASK.EGOMAP_SENSOR.MAP_RESOLUTION = 0.1
+_TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (0.5, 2.0)
+
 # SPECTROGRAM_SENSOR
 # -----------------------------------------------------------------------------
 _TC.TASK.SPECTROGRAM_SENSOR = CN()
