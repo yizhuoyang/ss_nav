@@ -13,7 +13,11 @@ from collections import deque
 from typing import Dict, List
 import json
 import random
-
+import sys
+sys.path.append("/media/kemove/data/av_nav/network/audionet")
+sys.path.append("/media/kemove/data/av_nav/utlis")
+from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame
+from ssl_net_infer import SSLNet
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
@@ -116,7 +120,7 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             dict containing checkpoint info
         """
-        return torch.load(checkpoint_path, *args, **kwargs)
+        return torch.load(checkpoint_path, weights_only = False,*args, **kwargs)
 
     def _collect_rollout_step(
             self, rollouts, current_episode_reward, current_episode_step, episode_rewards,
@@ -487,30 +491,34 @@ class PPOTrainer(BaseRLTrainer):
             model_resolution = self.config.DISPLAY_RESOLUTION
         config.freeze()
 
-        if len(self.config.VIDEO_OPTION) > 0:
-            config.defrost()
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
-            config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
-            config.freeze()
-        elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-            config.defrost()
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-            config.freeze()
+        # if len(self.config.VIDEO_OPTION) > 0:
+        config.defrost()
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+        config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
+        config.freeze()
+        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
+        #     config.defrost()
+        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        #     config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
+
+        habitat_env = self.envs.workers[0]._env.habitat_env
+        sim = habitat_env.sim
+
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
-            observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
-            observation_space.spaces['rgb'].shape = (model_resolution, model_resolution, 3)
+            # observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
+            # observation_space.spaces['rgb'].shape = (model_resolution, model_resolution, 3)
         else:
             observation_space = self.envs.observation_spaces[0]
         self._setup_actor_critic_agent(ppo_cfg)
 
-        self.agent.load_state_dict(ckpt_dict["state_dict"])
+        # self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
 
         self.metric_uuids = []
@@ -570,18 +578,37 @@ class PPOTrainer(BaseRLTrainer):
         ):
             current_episodes = self.envs.current_episodes()
 
-            with torch.no_grad():
-                _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
-                    batch,
-                    test_recurrent_hidden_states,
-                    prev_actions,
-                    not_done_masks,
-                    deterministic=True
-                )
+            ######### Suppose the location of the sound source is known ################
+            pose_all = observations[0]['pose']
+            if pose_all[-1]==0:
+                state = sim.get_agent_state()
+                current_position = state.position
+                self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1])
 
-                prev_actions.copy_(actions)
+            state = sim.get_agent_state()
+            current_position = state.position
+            source_loc    = sim.graph.nodes[sim._source_position_index]['point']
+            data = {
+                "action": np.array([source_loc[0],source_loc[-1]], dtype=np.int8)
+            }
+            print("!!!!!")
+            print(source_loc,current_position)
+            actions = [data]
+            outputs = self.envs.step(actions)
+            ######### Suppose the location of the sound source is known ################
+            # with torch.no_grad():
+            #     _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
+            #         batch,
+            #         test_recurrent_hidden_states,
+            #         prev_actions,
+            #         not_done_masks,
+            #         deterministic=True
+            #     )
+            #
+            #     prev_actions.copy_(actions)
+            #
+            # outputs = self.envs.step([{"action": a[0].item()} for a in actions])
 
-            outputs = self.envs.step([{"action": a[0].item()} for a in actions])
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
             if config.DISPLAY_RESOLUTION != model_resolution:
                 resize_observation(observations, model_resolution)

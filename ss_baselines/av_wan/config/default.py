@@ -110,6 +110,8 @@ _TC.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS = int(1e4)
 _TC.TASK.AUDIOGOAL_SENSOR = CN()
 _TC.TASK.AUDIOGOAL_SENSOR.TYPE = "AudioGoalSensor"
 # -----------------------------------------------------------------------------
+_TC.TASK.POSE_SENSOR = CN()
+_TC.TASK.POSE_SENSOR.TYPE = "PoseSensor"
 # SPECTROGRAM_SENSOR
 # -----------------------------------------------------------------------------
 _TC.TASK.SPECTROGRAM_SENSOR = CN()

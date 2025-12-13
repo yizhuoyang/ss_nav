@@ -54,8 +54,7 @@ class MapNavEnv(habitat.RLEnv):
         return observations
 
     def step(self, *args, **kwargs):
-        world_goal = kwargs["action"]            # (wx, wz)
-        intermediate_goal = self.planner.world_goal_to_intermediate_goal(world_goal)
+        intermediate_goal = kwargs["action"]
         self._previous_action = intermediate_goal
         goal = self.planner.get_map_coordinates(intermediate_goal)
         stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
@@ -165,5 +164,3 @@ class MapNavEnv(habitat.RLEnv):
 
     def egocentric_to_global(self, pg):
         return self.planner.mapper.egocentric_to_global(*pg)
-
-

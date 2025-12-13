@@ -803,3 +803,35 @@ class SoundSpacesSim(Simulator, ABC):
 
     def make_greedy_follower(self, *args, **kwargs):
         return self._sim.make_greedy_follower(*args, **kwargs)
+
+
+    def compute_oracle_actions_with_goal(self,receiver_position_index, source_position_index):
+        start_node = receiver_position_index
+        end_node = source_position_index
+        shortest_path = nx.shortest_path(self.graph, source=start_node, target=end_node)
+        assert shortest_path[0] == start_node and shortest_path[-1] == end_node
+        logging.debug(shortest_path)
+
+        oracle_actions = []
+        orientation = self.get_orientation()
+        for i in range(len(shortest_path) - 1):
+            prev_node = shortest_path[i]
+            next_node = shortest_path[i+1]
+            p1 = self.graph.nodes[prev_node]['point']
+            p2 = self.graph.nodes[next_node]['point']
+            direction = int(np.around(np.rad2deg(np.arctan2(p2[2] - p1[2], p2[0] - p1[0])))) % 360
+            if direction == orientation:
+                pass
+            elif (direction - orientation) % 360 == 270:
+                orientation = (orientation - 90) % 360
+                oracle_actions.append(HabitatSimActions.TURN_LEFT)
+            elif (direction - orientation) % 360 == 90:
+                orientation = (orientation + 90) % 360
+                oracle_actions.append(HabitatSimActions.TURN_RIGHT)
+            elif (direction - orientation) % 360 == 180:
+                orientation = (orientation - 180) % 360
+                oracle_actions.append(HabitatSimActions.TURN_RIGHT)
+                oracle_actions.append(HabitatSimActions.TURN_RIGHT)
+            oracle_actions.append(HabitatSimActions.MOVE_FORWARD)
+        oracle_actions.append(HabitatSimActions.STOP)
+        return oracle_actions

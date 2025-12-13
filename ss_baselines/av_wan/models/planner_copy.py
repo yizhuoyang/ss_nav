@@ -129,11 +129,6 @@ class Planner:
 
         return action
 
-    def plan_world(self, observation: dict, goal_world, stop, distribution=None):
-        # goal_world = (wx, wz)
-        gx, gy = self.mapper.world_to_map(goal_world[0], goal_world[1])
-        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution)
-
     def get_map_coordinates(self, relative_goal):
         map_size = self._action_map_size
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
@@ -212,19 +207,3 @@ class Planner:
         max_connected_graph = max(connected_subgraphs, key=len)
 
         return nx.Graph(max_connected_graph)
-    def global_goal_to_intermediate_goal(self, goal_xy):
-        x_goal, y_goal = int(goal_xy[0]), int(goal_xy[1])
-        map_size = self._action_map_size
-        c = map_size // 2
-
-        ex, ey = self.mapper.global_to_egocentric(x_goal, y_goal)
-        ex = int(np.round(ex))
-        ey = int(np.round(ey))
-
-        pg_x = int(np.clip(c + ex, 0, map_size - 1))
-        pg_y = int(np.clip(c + ey, 0, map_size - 1))
-        return int(pg_y * map_size + pg_x)
-    def world_goal_to_intermediate_goal(self, goal_world):
-        wx, wz = float(goal_world[0]), float(goal_world[1])
-        x_goal, y_goal = self.mapper.world_to_map(wx, wz)
-        return self.global_goal_to_intermediate_goal((x_goal, y_goal))
