@@ -64,6 +64,9 @@ class Planner:
         self._seg_start = None
         self._prev_depth = None
 
+        self._last_collided = False
+        self._block_forward_steps = 0
+
     # -----------------------------
     # lifecycle
     # -----------------------------
@@ -94,6 +97,7 @@ class Planner:
         ego_map = to_array(observation['ego_map'])
         depth = to_array(observation['depth'])
         collided = to_array(observation['collision'][0])
+
         intensity = to_array(observation['intensity'][0]) if 'intensity' in observation else None
 
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
@@ -107,6 +111,22 @@ class Planner:
             if self._graph.has_edge(self._prev_next_node, current_node):
                 self._graph.remove_edge(self._prev_next_node, current_node)
                 self._removed_edges.append((self._prev_next_node, current_node))
+
+        elif collided:
+            # 1) 删除“当前->前方”边（最关键）
+            xg, yg = self._snap_to_navigable_grid(x, y)
+            s = self.mapper._stride
+            fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
+            fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
+            fx, fy = self._snap_to_navigable_grid(fx, fy)
+
+            cur_node = self._map_index_to_graph_nodes([(xg, yg)])[0]
+            fwd_node = self._map_index_to_graph_nodes([(fx, fy)])[0]
+
+            if cur_node in self._graph and fwd_node in self._graph and self._graph.has_edge(cur_node, fwd_node):
+                self._graph.remove_edge(cur_node, fwd_node)
+                self._removed_edges.append((cur_node, fwd_node))
+
 
         self._prev_depth = depth
 
@@ -154,9 +174,7 @@ class Planner:
 
         cur_node = self._node_id(xg, yg)
         tgt_node = self._node_id(ggx, ggy)
-        print("pose:", (x, y, orientation))
-        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy))
-        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+
 
         if cur_node in self._graph and tgt_node in self._graph:
             print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
@@ -193,15 +211,14 @@ class Planner:
             self._prev_action = action
             return action
 
-        lookahead = 5
+        lookahead = 10
         idx = min(lookahead, len(path) - 1)
         if idx < 1:
             idx = 1
         inter_node = path[idx]
         inter_xy = self._graph.nodes[inter_node]["map_index"]
 
-        # ===== 2) 定义：从某个 (x,y) 到 intermediate 的图距离（最短步数）=====
-        # 注意：用图距离而不是欧式/atan2，避免离散/对角线问题
+
         def graph_dist_from_mapxy_to_inter(x_map, y_map):
             n = self._map_index_to_graph_nodes([(x_map, y_map)])[0]
             if n not in self._graph:
@@ -211,25 +228,30 @@ class Planner:
             except Exception:
                 return 10**9
 
-        # 当前点（最好也 snap 一下）
-        xg, yg = self._snap_to_navigable_grid(x, y)
 
         cur_d = graph_dist_from_mapxy_to_inter(xg, yg)
 
-        # ===== 3) 计算“前进一步”的格子坐标（按 mapper 定义）=====
+        xg, yg = self._snap_to_navigable_grid(x, y)
+
+        # 前进一步坐标
         s = self.mapper._stride
         fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
         fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
 
-        # 如果 forward cell 不在图里 / 不可走，则视为无穷远
-        f_d = graph_dist_from_mapxy_to_inter(fx, fy)
+        can_fwd = self._can_move_to(xg, yg, fx, fy)
+        # can_fwd = self.check_navigability((fx,fy))
 
-        # ===== 4) forward-first：如果前进一步能缩短到 intermediate 的图距离，就前进 =====
-        # 你可以用 f_d < cur_d 或者更激进一点 f_d <= cur_d
-        if f_d < cur_d:
+        f_d = graph_dist_from_mapxy_to_inter(fx, fy) if can_fwd else 10**9
+
+        print("pose:", (x, y, orientation))
+        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
+        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+        print(can_fwd,f_d,cur_d)
+        print(xg,yg,fx,fy)
+
+        if can_fwd and (f_d < cur_d):
             action = HabitatSimActions.MOVE_FORWARD
             self._prev_action = action
-            self._prev_next_node = None
             return action
 
         # ===== 5) 否则，比较“左转一次后前进” vs “右转一次后前进” 哪个更好 =====
@@ -494,3 +516,30 @@ class Planner:
             prev_x, prev_y = xi, yi
 
         return d, steps
+
+
+    def _can_move_to(self, x_from, y_from, x_to, y_to):
+        """
+        判断从(from)到(to)这条 stride 边是否可走：
+        1) to 节点在图里
+        2) (from,to) 边在图里
+        3) geometric_map 上 to 不是障碍（更强的兜底）
+        """
+        # snap 到网格
+        x_from, y_from = self._snap_to_navigable_grid(x_from, y_from)
+        x_to, y_to     = self._snap_to_navigable_grid(x_to, y_to)
+
+        n_from = self._map_index_to_graph_nodes([(x_from, y_from)])[0]
+        n_to   = self._map_index_to_graph_nodes([(x_to, y_to)])[0]
+
+        if n_from not in self._graph or n_to not in self._graph:
+            return False
+        if not self._graph.has_edge(n_from, n_to):
+            return False
+
+        geometric_map, _, _, _, _ = self.mapper.get_maps_and_agent_pose()
+        # geometric_map[y,x,0] = obstacle channel; 1 means obstacle
+        if geometric_map[y_to, x_to, 0] > 0.5:
+            return False
+
+        return True
