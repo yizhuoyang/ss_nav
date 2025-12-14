@@ -303,11 +303,9 @@ class Mapper(nn.Module):
         return ego_om
 
     def world_to_map(self, wx: float, wz: float):
-        # world 位移(米)
         dx = wx - self._world_x0
         dz = wz - self._world_z0
 
-        # 米 -> 像素（gm_res: 米/像素）
         mx = int(round(self._internal_gm_size / 2 + dx / self._gm_res))
         my = int(round(self._internal_gm_size / 2 + dz / self._gm_res))
         return mx, my

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
 import logging
-import os
-
 import networkx as nx
 import numpy as np
 import torch
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
+
 from ss_baselines.av_wan.models.mapper import Mapper, to_array
 
 
 class Planner:
+    """
+    Online planner that ONLY uses the accumulated occupancy map (Mapper.geometric_map),
+    without requiring NavMesh.
+
+    Supports:
+      - plan(observation, goal=(gx,gy), stop=bool)
+      - plan_world(observation, goal_world=(wx,wz), stop=bool)
+    """
+
     def __init__(self, task_config=None, use_acoustic_map=False, model_dir=None, masking=True):
         self.mapper = Mapper(
             gm_config=task_config.TASK.GEOMETRIC_MAP,
@@ -27,31 +31,65 @@ class Planner:
 
         self._action_map_res = task_config.TASK.ACTION_MAP.MAP_RESOLUTION
         self._action_map_size = task_config.TASK.ACTION_MAP.MAP_SIZE
-        self._prev_depth = None
+
         self._prev_next_node = None
         self._prev_action = None
+
         self._obstacles = []
         self._obstacle_threshold = 0.5
+
+        # navigable grid points in internal geometric map
         self._navigable_xs, self._navigable_ys = self.mapper.compute_navigable_xys()
+
+        # initial graph from current geometric map
         self._graph = self._map_to_graph(self.mapper.get_maps_and_agent_pose()[0])
+
+        # incrementally removed nodes/edges (for reset)
         self._removed_edges = list()
         self._removed_nodes = list()
+
         self._model_dir = model_dir
         self._masking = masking
 
+        # --- stabilizers for 90-degree action space ---
+        self._turn_bias = HabitatSimActions.TURN_LEFT  # when rotation==180, do not random
+        self._lookahead = 8                            # 5~10 works well for 90-degree turning
+
+
         self.reset()
 
+        self._seg_dir = None
+        self._seg_steps_left = 0
+        self._seg_goal = None
+        self._seg_start = None
+        self._prev_depth = None
+
+    # -----------------------------
+    # lifecycle
+    # -----------------------------
     def reset(self):
         self._prev_depth = None
         self._prev_next_node = None
         self._prev_action = None
         self._obstacles = []
         self.mapper.reset()
-        self._graph.add_nodes_from(self._removed_nodes)
-        self._graph.add_edges_from(self._removed_edges)
+
+        # restore removed nodes/edges if any
+        # NOTE: removed_nodes stores tuples (node, attr_dict)
+        if len(self._removed_nodes) > 0:
+            for n, attr in self._removed_nodes:
+                self._graph.add_node(n, **attr)
+        if len(self._removed_edges) > 0:
+            self._graph.add_edges_from(self._removed_edges)
+
         self._removed_nodes.clear()
         self._removed_edges.clear()
 
+        self._turn_bias = HabitatSimActions.TURN_LEFT
+
+    # -----------------------------
+    # map & graph update
+    # -----------------------------
     def update_map_and_graph(self, observation):
         ego_map = to_array(observation['ego_map'])
         depth = to_array(observation['depth'])
@@ -59,14 +97,17 @@ class Planner:
         intensity = to_array(observation['intensity'][0]) if 'intensity' in observation else None
 
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
+
         if not collided:
             non_navigable_points, blocked_paths = self.mapper.update(self._prev_action, ego_map, intensity)
             self._update_graph(non_navigable_points, blocked_paths)
         elif self._prev_next_node in self._graph.nodes:
             # only the edge to the previous next node should be removed
             current_node = self._map_index_to_graph_nodes([(x, y)])[0]
-            self._graph.remove_edge(self._prev_next_node, current_node)
-            self._removed_edges.append((self._prev_next_node, current_node))
+            if self._graph.has_edge(self._prev_next_node, current_node):
+                self._graph.remove_edge(self._prev_next_node, current_node)
+                self._removed_edges.append((self._prev_next_node, current_node))
+
         self._prev_depth = depth
 
         if logging.root.level == logging.DEBUG:
@@ -82,149 +123,374 @@ class Planner:
         if 'am' in observation:
             observation['am'] = self.mapper.get_egocentric_acoustic_map().astype(np.float32)
         if 'action_map' in observation:
-            observation['action_map'] = np.expand_dims(self.mapper.get_egocentric_occupancy_map(
-                    size=self._action_map_size, action_map_res=self._action_map_res), -1).astype(np.float32)
+            observation['action_map'] = np.expand_dims(
+                self.mapper.get_egocentric_occupancy_map(
+                    size=self._action_map_size,
+                    action_map_res=self._action_map_res
+                ),
+                -1
+            ).astype(np.float32)
 
+    # -----------------------------
+    # core planning (GLOBAL MAP GOAL)
+    # -----------------------------
     def plan(self, observation: dict, goal, stop, distribution=None) -> torch.Tensor:
+        """
+        goal: (gx, gy) in GLOBAL MAP INDEX (internal geometric map coordinates)
+        stop: bool
+        """
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
-        graph_nodes = self._map_index_to_graph_nodes([(x, y), (goal[0], goal[1])])
 
-        next_node = next_node_idx = None
         if stop:
             action = HabitatSimActions.STOP
             self._prev_next_node = None
-        else:
-            try:
-                shortest_path = nx.shortest_path(self._graph, source=graph_nodes[0], target=graph_nodes[1])
-                # decide if the agent needs to rotate based on the connectivity with the next node
-                next_node_idx = self._graph.nodes[shortest_path[1]]['map_index']
-                self._prev_next_node = shortest_path[1]
-                desired_orientation = np.round(
-                    np.rad2deg(np.arctan2(next_node_idx[1] - y, next_node_idx[0] - x))) % 360
-                rotation = (desired_orientation - orientation) % 360
+            self._prev_action = action
+            return action
 
-                # egocentric frame where the agent faces +x direction
-                if rotation == 0:
-                    action = HabitatSimActions.MOVE_FORWARD
-                elif rotation == 90:
-                    action = HabitatSimActions.TURN_RIGHT
-                elif rotation == 180:
-                    action = np.random.choice([HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT])
-                elif rotation == 270:
-                    action = HabitatSimActions.TURN_LEFT
-                else:
-                    raise ValueError('Invalid rotation')
-            except (nx.exception.NetworkXNoPath, nx.exception.NodeNotFound) as e:
-                assert not (self._masking and isinstance(e, nx.exception.NodeNotFound))
-                # randomly select a node from neighbors
-                adjacent_point_coordinates = self.mapper.get_adjacent_point_coordinates()
-                adjacent_node = self._map_index_to_graph_nodes([adjacent_point_coordinates])[0]
-                if adjacent_node in self._graph.nodes and (graph_nodes[0], adjacent_node) in self._graph.edges:
-                    action = np.random.choice([HabitatSimActions.MOVE_FORWARD, HabitatSimActions.TURN_LEFT,
-                                               HabitatSimActions.TURN_RIGHT])
-                else:
-                    action = np.random.choice([HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT])
+        # 1) snap current & goal to the nearest navigable grid point (CRITICAL)
+        xg, yg = self._snap_to_navigable_grid(x, y)
+        gx, gy = int(goal[0]), int(goal[1])
+        ggx, ggy = self._snap_to_navigable_grid(gx, gy)
+
+        cur_node = self._node_id(xg, yg)
+        tgt_node = self._node_id(ggx, ggy)
+        print("pose:", (x, y, orientation))
+        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy))
+        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+
+        if cur_node in self._graph and tgt_node in self._graph:
+            print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
+
+        # 2) ensure current node exists
+        if cur_node not in self._graph:
+            action = HabitatSimActions.TURN_LEFT
+            self._prev_next_node = None
+            self._prev_action = action
+            return action
+
+        # 3) if goal node not in graph / not reachable -> project to nearest reachable node
+        if tgt_node not in self._graph or not nx.has_path(self._graph, cur_node, tgt_node):
+            nn = self._nearest_reachable_node((ggx, ggy), cur_node)
+            if nn is None:
+                action = HabitatSimActions.TURN_LEFT
                 self._prev_next_node = None
-        self._prev_action = action
+                self._prev_action = action
+                return action
+            tgt_node = nn
 
+        # 4) shortest path
+        try:
+            path = nx.shortest_path(self._graph, source=cur_node, target=tgt_node)
+        except (nx.exception.NetworkXNoPath, nx.exception.NodeNotFound):
+            action = HabitatSimActions.TURN_LEFT
+            self._prev_next_node = None
+            self._prev_action = action
+            return action
+
+        if len(path) < 1:
+            action = HabitatSimActions.STOP
+            self._prev_next_node = None
+            self._prev_action = action
+            return action
+
+        lookahead = 5
+        idx = min(lookahead, len(path) - 1)
+        if idx < 1:
+            idx = 1
+        inter_node = path[idx]
+        inter_xy = self._graph.nodes[inter_node]["map_index"]
+
+        # ===== 2) 定义：从某个 (x,y) 到 intermediate 的图距离（最短步数）=====
+        # 注意：用图距离而不是欧式/atan2，避免离散/对角线问题
+        def graph_dist_from_mapxy_to_inter(x_map, y_map):
+            n = self._map_index_to_graph_nodes([(x_map, y_map)])[0]
+            if n not in self._graph:
+                return 10**9
+            try:
+                return nx.shortest_path_length(self._graph, n, inter_node)
+            except Exception:
+                return 10**9
+
+        # 当前点（最好也 snap 一下）
+        xg, yg = self._snap_to_navigable_grid(x, y)
+
+        cur_d = graph_dist_from_mapxy_to_inter(xg, yg)
+
+        # ===== 3) 计算“前进一步”的格子坐标（按 mapper 定义）=====
+        s = self.mapper._stride
+        fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
+        fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
+
+        # 如果 forward cell 不在图里 / 不可走，则视为无穷远
+        f_d = graph_dist_from_mapxy_to_inter(fx, fy)
+
+        # ===== 4) forward-first：如果前进一步能缩短到 intermediate 的图距离，就前进 =====
+        # 你可以用 f_d < cur_d 或者更激进一点 f_d <= cur_d
+        if f_d < cur_d:
+            action = HabitatSimActions.MOVE_FORWARD
+            self._prev_action = action
+            self._prev_next_node = None
+            return action
+
+        # ===== 5) 否则，比较“左转一次后前进” vs “右转一次后前进” 哪个更好 =====
+        left_o  = (orientation - 90) % 360
+        right_o = (orientation + 90) % 360
+
+        lfx = xg + int(round(s * np.cos(np.deg2rad(left_o))))
+        lfy = yg + int(round(s * np.sin(np.deg2rad(left_o))))
+        rfx = xg + int(round(s * np.cos(np.deg2rad(right_o))))
+        rfy = yg + int(round(s * np.sin(np.deg2rad(right_o))))
+
+        ld = graph_dist_from_mapxy_to_inter(lfx, lfy)
+        rd = graph_dist_from_mapxy_to_inter(rfx, rfy)
+
+        # 如果某一侧转了以后“下一步更接近”，优先转向那一侧
+        if ld < rd:
+            action = HabitatSimActions.TURN_LEFT
+        elif rd < ld:
+            action = HabitatSimActions.TURN_RIGHT
+        else:
+            action = getattr(self, "_turn_bias", HabitatSimActions.TURN_LEFT)
+
+        # 更新 turn_bias，避免 180°/tie 时抖动
+        if action == HabitatSimActions.TURN_LEFT:
+            self._turn_bias = HabitatSimActions.TURN_LEFT
+        elif action == HabitatSimActions.TURN_RIGHT:
+            self._turn_bias = HabitatSimActions.TURN_RIGHT
+
+        self._prev_action = action
+        self._prev_next_node = None
         return action
 
+
+    # -----------------------------
+    # planning with WORLD GOAL
+    # -----------------------------
     def plan_world(self, observation: dict, goal_world, stop, distribution=None):
-        # goal_world = (wx, wz)
+        """
+        goal_world: (wx, wz)
+        """
         gx, gy = self.mapper.world_to_map(goal_world[0], goal_world[1])
         return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution)
 
+    # -----------------------------
+    # helper: goal <-> intermediate (kept)
+    # -----------------------------
     def get_map_coordinates(self, relative_goal):
         map_size = self._action_map_size
-        geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
+        _, _, x, y, _ = self.mapper.get_maps_and_agent_pose()
         pg_y, pg_x = np.unravel_index(relative_goal, (map_size, map_size))
         pg_x = int(pg_x - map_size // 2)
         pg_y = int(pg_y - map_size // 2)
-
-        # transform goal location to be in the global coordinate frame
         delta_x, delta_y = self.mapper.egocentric_to_allocentric(pg_x, pg_y, action_map_res=self._action_map_res)
         return x + delta_x, y + delta_y
 
+    def goal_to_intermediate_goal(self, goal_xy):
+        map_size = self._action_map_size
+        c = map_size // 2
+        _, _, x, y, _ = self.mapper.get_maps_and_agent_pose()
+
+        x_goal, y_goal = int(goal_xy[0]), int(goal_xy[1])
+        dx = x_goal - x
+        dy = y_goal - y
+        ex, ey = self.mapper.allocentric_to_egocentric(dx, dy, action_map_res=self._action_map_res)
+        ex = int(np.round(ex))
+        ey = int(np.round(ey))
+        pg_x = int(np.clip(c + ex, 0, map_size - 1))
+        pg_y = int(np.clip(c + ey, 0, map_size - 1))
+        return int(pg_y * map_size + pg_x)
+
+    def global_goal_to_intermediate_goal(self, goal_xy):
+        x_goal, y_goal = int(goal_xy[0]), int(goal_xy[1])
+        map_size = self._action_map_size
+        c = map_size // 2
+        ex, ey = self.mapper.global_to_egocentric(x_goal, y_goal)
+        ex = int(np.round(ex))
+        ey = int(np.round(ey))
+        pg_x = int(np.clip(c + ex, 0, map_size - 1))
+        pg_y = int(np.clip(c + ey, 0, map_size - 1))
+        return int(pg_y * map_size + pg_x)
+
+    def world_goal_to_intermediate_goal(self, goal_world):
+        wx, wz = float(goal_world[0]), float(goal_world[1])
+        x_goal, y_goal = self.mapper.world_to_map(wx, wz)
+        return self.global_goal_to_intermediate_goal((x_goal, y_goal))
+
+    # -----------------------------
+    # navigability check (kept)
+    # -----------------------------
     def check_navigability(self, goal):
-        geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
+        _, _, x, y, _ = self.mapper.get_maps_and_agent_pose()
         graph_nodes = self._map_index_to_graph_nodes([(x, y), goal])
-        navigable = graph_nodes[1] in self._graph.nodes, graph_nodes[1] in self._graph.nodes \
-                        and nx.has_path(self._graph, source=graph_nodes[0], target=graph_nodes[1])
+        if graph_nodes[0] not in self._graph:
+            return False
+        return (graph_nodes[1] in self._graph) and nx.has_path(self._graph, source=graph_nodes[0], target=graph_nodes[1])
 
-        return all(navigable)
-
+    # -----------------------------
+    # incremental graph update (kept)
+    # -----------------------------
     def _update_graph(self, non_navigable_points, blocked_paths):
         non_navigable_nodes = self._map_index_to_graph_nodes(non_navigable_points)
         blocked_edges = [self._map_index_to_graph_nodes([a, b]) for a, b in blocked_paths]
 
         for node in non_navigable_nodes:
             if node in self._graph.nodes:
-                self._removed_nodes.append((node, self._graph.nodes[node]))
+                # store node attrs for reset
+                self._removed_nodes.append((node, dict(self._graph.nodes[node])))
+                # store edges for reset
                 self._removed_edges += [(node, neighbor) for neighbor in self._graph[node]]
+
         self._removed_edges += blocked_edges
 
         self._graph.remove_nodes_from(non_navigable_nodes)
         self._graph.remove_edges_from(blocked_edges)
 
+    # -----------------------------
+    # mapping between map index and graph nodes (kept)
+    # -----------------------------
     def _map_index_to_graph_nodes(self, map_indices: list) -> list:
         graph_nodes = list()
         for map_index in map_indices:
             graph_nodes.append(map_index[1] * len(self._navigable_ys) + map_index[0])
         return graph_nodes
 
+    # -----------------------------
+    # build graph from occupancy map
+    # -----------------------------
     def _map_to_graph(self, geometric_map: np.array) -> nx.Graph:
-        # after bitwise_and op, 0 indicates free or unexplored, 1 indicate obstacles
-        occupancy_map = np.bitwise_and(geometric_map[:, :, 0] >= self._obstacle_threshold,
-                                       geometric_map[:, :, 1] >= self._obstacle_threshold)
+        """
+        Build grid graph from geometric_map.
+        occupancy_map==1 means obstacle.
+        NOTE: we REMOVE the "keep only largest component" trimming to avoid goal disappearing.
+        """
+        occupancy_map = np.bitwise_and(
+            geometric_map[:, :, 0] >= self._obstacle_threshold,
+            geometric_map[:, :, 1] >= self._obstacle_threshold
+        )
+
         graph = nx.Graph()
         for idx_y, y in enumerate(self._navigable_ys):
             for idx_x, x in enumerate(self._navigable_xs):
                 node_index = y * len(self._navigable_ys) + x
 
                 if occupancy_map[y][x]:
-                    # obstacle
                     continue
 
-                # no obstacle to the next navigable point along +Z direction
+                if node_index not in graph:
+                    graph.add_node(node_index, map_index=(x, y))
+
+                # +Y direction
                 if idx_y < len(self._navigable_ys) - 1:
                     next_y = self._navigable_ys[idx_y + 1]
-                    if not any(occupancy_map[y: next_y+1, x]):
+                    if not occupancy_map[y: next_y + 1, x].any():
                         next_node_index = next_y * len(self._navigable_ys) + x
-                        if node_index not in graph:
-                            graph.add_node(node_index, map_index=(x, y))
                         if next_node_index not in graph:
                             graph.add_node(next_node_index, map_index=(x, next_y))
                         graph.add_edge(node_index, next_node_index)
 
-                # no obstacle to the next navigable point along +X direction
+                # +X direction
                 if idx_x < len(self._navigable_xs) - 1:
                     next_x = self._navigable_xs[idx_x + 1]
-                    if not any(occupancy_map[y, x: next_x+1]):
+                    if not occupancy_map[y, x: next_x + 1].any():
                         next_node_index = y * len(self._navigable_ys) + next_x
-                        if node_index not in graph:
-                            graph.add_node(node_index, map_index=(x, y))
                         if next_node_index not in graph:
                             graph.add_node(next_node_index, map_index=(next_x, y))
                         graph.add_edge(node_index, next_node_index)
 
-        # trim the graph such that it only keeps the largest subgraph
-        connected_subgraphs = (graph.subgraph(c) for c in nx.connected_components(graph))
-        max_connected_graph = max(connected_subgraphs, key=len)
+        return graph
 
-        return nx.Graph(max_connected_graph)
-    def global_goal_to_intermediate_goal(self, goal_xy):
-        x_goal, y_goal = int(goal_xy[0]), int(goal_xy[1])
-        map_size = self._action_map_size
-        c = map_size // 2
+    # =========================================================
+    #  NEW helpers for stable 90-degree planning
+    # =========================================================
+    def _snap_to_navigable_grid(self, x, y):
+        xs = np.asarray(self._navigable_xs)
+        ys = np.asarray(self._navigable_ys)
+        xg = int(xs[np.argmin((xs - x) ** 2)])
+        yg = int(ys[np.argmin((ys - y) ** 2)])
+        return xg, yg
 
-        ex, ey = self.mapper.global_to_egocentric(x_goal, y_goal)
-        ex = int(np.round(ex))
-        ey = int(np.round(ey))
+    def _node_id(self, x, y):
+        return y * len(self._navigable_ys) + x
 
-        pg_x = int(np.clip(c + ex, 0, map_size - 1))
-        pg_y = int(np.clip(c + ey, 0, map_size - 1))
-        return int(pg_y * map_size + pg_x)
-    def world_goal_to_intermediate_goal(self, goal_world):
-        wx, wz = float(goal_world[0]), float(goal_world[1])
-        x_goal, y_goal = self.mapper.world_to_map(wx, wz)
-        return self.global_goal_to_intermediate_goal((x_goal, y_goal))
+    def _nearest_reachable_node(self, goal_xy, cur_node):
+        gx, gy = int(goal_xy[0]), int(goal_xy[1])
+        try:
+            comp = nx.node_connected_component(self._graph, cur_node)
+        except Exception:
+            comp = self._graph.nodes
+
+        best = None
+        best_d2 = 1e18
+        for n in comp:
+            mi = self._graph.nodes[n].get("map_index", None)
+            if mi is None:
+                continue
+            x, y = mi
+            d2 = (x - gx) ** 2 + (y - gy) ** 2
+            if d2 < best_d2:
+                best_d2 = d2
+                best = n
+        return best
+
+    def _choose_lookahead_node(self, path):
+        """
+        For 90-degree turning: pick a node after the first corner,
+        or a far node if no corner in lookahead.
+        """
+        kmax = min(self._lookahead, len(path) - 1)
+
+        def axis(p, q):
+            x1, y1 = self._graph.nodes[p]["map_index"]
+            x2, y2 = self._graph.nodes[q]["map_index"]
+            return 0 if x2 != x1 else 1  # 0: x changes, 1: y changes
+
+        chosen = path[1]
+        prev_axis = axis(path[0], path[1])
+        chosen = path[min(1, kmax)]
+
+        for i in range(1, kmax):
+            a = axis(path[i - 1], path[i])
+            b = axis(path[i], path[i + 1])
+            if b != a:
+                chosen = path[i + 1]  # node after corner
+                break
+            chosen = path[i + 1]
+
+        return chosen
+
+
+    def _dir_from_delta(self, dx, dy, s):
+        if dx == s and dy == 0:   return 0
+        if dx == 0 and dy == s:   return 90
+        if dx == -s and dy == 0:  return 180
+        if dx == 0 and dy == -s:  return 270
+        return None
+
+    def _compress_path_to_first_segment(self, path, xg, yg):
+        """
+        输入 path(node ids)，输出第一段的方向(dir)和长度(steps)
+        """
+        s = self.mapper._stride
+        if len(path) < 2:
+            return None, 0
+
+        # 第一步方向
+        x1, y1 = self._graph.nodes[path[1]]["map_index"]
+        dx1, dy1 = x1 - xg, y1 - yg
+        d = self._dir_from_delta(dx1, dy1, s)
+        if d is None:
+            return None, 0
+
+        # 往后数同方向能走多少步
+        steps = 1
+        prev_x, prev_y = x1, y1
+        for i in range(2, len(path)):
+            xi, yi = self._graph.nodes[path[i]]["map_index"]
+            dx, dy = xi - prev_x, yi - prev_y
+            di = self._dir_from_delta(dx, dy, s)
+            if di != d:
+                break
+            steps += 1
+            prev_x, prev_y = xi, yi
+
+        return d, steps

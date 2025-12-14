@@ -54,11 +54,17 @@ class MapNavEnv(habitat.RLEnv):
         return observations
 
     def step(self, *args, **kwargs):
-        world_goal = kwargs["action"]            # (wx, wz)
-        intermediate_goal = self.planner.world_goal_to_intermediate_goal(world_goal)
-        self._previous_action = intermediate_goal
-        goal = self.planner.get_map_coordinates(intermediate_goal)
-        stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
+        world_goal = kwargs["action"]
+        goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
+        _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
+        # intermediate_goal = self.planner.goal_to_intermediate_goal(goal)
+        # waypoint_map = self.planner.get_map_coordinates(intermediate_goal)  # 这是“当前一步的局部 waypoint”
+        # self._previous_action = intermediate_goal
+        # print(goal,self.planner.mapper._world_x0,self.planner.mapper._world_z0,)
+        # stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
+        agent_pose = kwargs["agent_pos"]
+        stop = np.linalg.norm(world_goal - agent_pose) < 1.0
+
         observation = self._previous_observation
         cumulative_reward = 0
         done = False
@@ -72,7 +78,9 @@ class MapNavEnv(habitat.RLEnv):
             if step_count != 0 and not self.planner.check_navigability(goal):
                 cant_reach_waypoint = True
                 break
-            action = self.planner.plan(observation, goal, stop=stop)
+            # action = self.planner.plan(observation, waypoint_map, stop=stop)
+            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop)
+
             observation, reward, done, info = super().step({"action": action})
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:

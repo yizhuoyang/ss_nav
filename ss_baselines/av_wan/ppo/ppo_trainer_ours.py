@@ -589,9 +589,9 @@ class PPOTrainer(BaseRLTrainer):
             current_position = state.position
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
             data = {
-                "action": np.array([source_loc[0],source_loc[-1]], dtype=np.int8)
+                "action": np.array([source_loc[0],source_loc[-1]]),
+                "agent_pos": np.array([current_position[0],current_position[-1]])
             }
-            print("!!!!!")
             print(source_loc,current_position)
             actions = [data]
             outputs = self.envs.step(actions)
