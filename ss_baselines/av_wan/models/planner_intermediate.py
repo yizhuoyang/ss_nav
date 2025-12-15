@@ -261,28 +261,43 @@ class Planner:
 
         f_d = graph_dist_from_mapxy_to_inter(fx, fy) if can_fwd else 10**9
         #
+
+        #
         if can_fwd and (f_d < cur_d):
             action = HabitatSimActions.MOVE_FORWARD
             self._prev_action = action
             return action
 
-        next_node_idx = self._graph.nodes[path[1]]['map_index']
-        self._prev_next_node = path[1]
-        desired_orientation = np.round(
-            np.rad2deg(np.arctan2(next_node_idx[1] - y, next_node_idx[0] - x))) % 360
-        rotation = (desired_orientation - orientation) % 360
 
-        if rotation == 0:
-            action = HabitatSimActions.MOVE_FORWARD
-        elif rotation == 90:
-            action = HabitatSimActions.TURN_RIGHT
-        elif rotation == 180:
-            action = np.random.choice([HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT])
-        elif rotation == 270:
+        # action = self._turn_toward_intermediate(xg, yg, orientation, inter_xy)
+        # if action in (HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT):
+        #     self._turn_bias = action
+
+        left_o  = (orientation - 90) % 360
+        right_o = (orientation + 90) % 360
+
+        lfx = xg + int(round(s * np.cos(np.deg2rad(left_o))))
+        lfy = yg + int(round(s * np.sin(np.deg2rad(left_o))))
+        rfx = xg + int(round(s * np.cos(np.deg2rad(right_o))))
+        rfy = yg + int(round(s * np.sin(np.deg2rad(right_o))))
+
+        ld = graph_dist_from_mapxy_to_inter(lfx, lfy)
+        rd = graph_dist_from_mapxy_to_inter(rfx, rfy)
+        print("pose:", (x, y, orientation))
+        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
+        print("init_x:",self.mapper._world_x0,"init_z:",self.mapper._world_z0)
+        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+        print(can_fwd,f_d,cur_d,ld,rd)
+        print(xg,yg,fx,fy)
+        # 如果某一侧转了以后“下一步更接近”，优先转向那一侧
+        if ld < rd:
             action = HabitatSimActions.TURN_LEFT
+        elif rd < ld:
+            action = HabitatSimActions.TURN_RIGHT
         else:
-            raise ValueError('Invalid rotation')
+            action = getattr(self, "_turn_bias", HabitatSimActions.TURN_LEFT)
 
+        # 更新 turn_bias，避免 180°/tie 时抖动
         if action == HabitatSimActions.TURN_LEFT:
             self._turn_bias = HabitatSimActions.TURN_LEFT
         elif action == HabitatSimActions.TURN_RIGHT:
