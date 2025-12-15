@@ -7,7 +7,8 @@ import networkx as nx
 import numpy as np
 import torch
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
-
+import os
+import matplotlib.pyplot as plt
 from ss_baselines.av_wan.models.mapper import Mapper, to_array
 
 
@@ -67,6 +68,11 @@ class Planner:
         self._last_collided = False
         self._block_forward_steps = 0
 
+        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan"
+        os.makedirs(self._debug_dir, exist_ok=True)
+        self._debug_step = 0
+        self._debug_every = 1  # 每步都画；想降低开销可设 5/10
+
     # -----------------------------
     # lifecycle
     # -----------------------------
@@ -113,7 +119,6 @@ class Planner:
                 self._removed_edges.append((self._prev_next_node, current_node))
 
         elif collided:
-            # 1) 删除“当前->前方”边（最关键）
             xg, yg = self._snap_to_navigable_grid(x, y)
             s = self.mapper._stride
             fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
@@ -205,11 +210,11 @@ class Planner:
             self._prev_action = action
             return action
 
-        if len(path) < 1:
-            action = HabitatSimActions.STOP
-            self._prev_next_node = None
-            self._prev_action = action
-            return action
+        # if len(path) < 1:
+        #     action = HabitatSimActions.STOP
+        #     self._prev_next_node = None
+        #     self._prev_action = action
+        #     return action
 
         lookahead = 10
         idx = min(lookahead, len(path) - 1)
@@ -218,6 +223,19 @@ class Planner:
         inter_node = path[idx]
         inter_xy = self._graph.nodes[inter_node]["map_index"]
 
+        # ===== debug draw =====
+        if (self._debug_step % self._debug_every) == 0:
+            self._plot_plan_debug(
+                geometric_map=geometric_map,
+                cur_xy=(xg, yg),
+                goal_xy=(gx, gy),
+                goal_snap_xy=(ggx, ggy),
+                inter_xy=inter_xy,
+                path_nodes=path,
+                orientation = orientation,
+                save_prefix="plan"
+            )
+        self._debug_step += 1
 
         def graph_dist_from_mapxy_to_inter(x_map, y_map):
             n = self._map_index_to_graph_nodes([(x_map, y_map)])[0]
@@ -242,19 +260,19 @@ class Planner:
         # can_fwd = self.check_navigability((fx,fy))
 
         f_d = graph_dist_from_mapxy_to_inter(fx, fy) if can_fwd else 10**9
+        #
 
-        print("pose:", (x, y, orientation))
-        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
-        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
-        print(can_fwd,f_d,cur_d)
-        print(xg,yg,fx,fy)
-
+        #
         if can_fwd and (f_d < cur_d):
             action = HabitatSimActions.MOVE_FORWARD
             self._prev_action = action
             return action
 
-        # ===== 5) 否则，比较“左转一次后前进” vs “右转一次后前进” 哪个更好 =====
+
+        # action = self._turn_toward_intermediate(xg, yg, orientation, inter_xy)
+        # if action in (HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT):
+        #     self._turn_bias = action
+
         left_o  = (orientation - 90) % 360
         right_o = (orientation + 90) % 360
 
@@ -265,7 +283,12 @@ class Planner:
 
         ld = graph_dist_from_mapxy_to_inter(lfx, lfy)
         rd = graph_dist_from_mapxy_to_inter(rfx, rfy)
-
+        print("pose:", (x, y, orientation))
+        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
+        print("init_x:",self.mapper._world_x0,"init_z:",self.mapper._world_z0)
+        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+        print(can_fwd,f_d,cur_d,ld,rd)
+        print(xg,yg,fx,fy)
         # 如果某一侧转了以后“下一步更接近”，优先转向那一侧
         if ld < rd:
             action = HabitatSimActions.TURN_LEFT
@@ -543,3 +566,133 @@ class Planner:
             return False
 
         return True
+
+    def _turn_toward_intermediate(self, xg, yg, orientation, inter_xy):
+        tx, ty = inter_xy
+
+        # 目标向量 v = inter - agent
+        vx = tx - xg
+        vy = ty - yg
+
+        # 如果目标就在当前位置，不用转
+        if vx == 0 and vy == 0:
+            return None  # caller 决定 forward/stop
+
+        # 当前朝向单位向量 f（用你 Mapper 的定义：x += cos, y += sin）
+        fx = int(round(np.cos(np.deg2rad(orientation))))
+        fy = int(round(np.sin(np.deg2rad(orientation))))
+
+        # 叉积符号：cross = f x v（2D）
+        cross = fx * vy - fy * vx
+
+        if cross < 0:
+            return HabitatSimActions.TURN_LEFT
+        elif cross >= 0:
+            return HabitatSimActions.TURN_RIGHT
+        else:
+            # 共线：在正前或正后。用 bias 防抖
+            return getattr(self, "_turn_bias", HabitatSimActions.TURN_LEFT)
+
+    def _plot_plan_debug(
+        self,
+        geometric_map,
+        cur_xy,
+        goal_xy,
+        goal_snap_xy,
+        inter_xy,
+        path_nodes,
+        orientation,
+        save_prefix="plan",
+    ):
+        H, W, _ = geometric_map.shape
+
+        obs = geometric_map[:, :, 0] > 0.5   # obstacle
+        exp = geometric_map[:, :, 1] > 0.5   # explored
+
+        # ===== 背景 RGB 图（固定颜色）=====
+        # unexplored: dark gray, explored free: white, explored obstacle: black
+        bg = np.zeros((H, W, 3), dtype=np.uint8)
+
+        # 未探索：深灰
+        bg[:, :, :] = 60
+
+        # 已探索自由：白
+        bg[exp & (~obs)] = np.array([255, 255, 255], dtype=np.uint8)
+
+        # 已探索障碍：黑
+        bg[exp & (obs)] = np.array([0, 0, 0], dtype=np.uint8)
+
+        # ===== path nodes -> (x,y) =====
+        path_xy = []
+        if path_nodes is not None and len(path_nodes) > 0:
+            for n in path_nodes:
+                if n in self._graph:
+                    path_xy.append(self._graph.nodes[n]["map_index"])  # (x,y)
+
+        fig = plt.figure(figsize=(8, 8))
+        plt.imshow(bg, origin="upper")
+        plt.title(f"{save_prefix} step={self._debug_step}")
+
+        # ===== 最短路径：蓝色折线 =====
+        if len(path_xy) >= 2:
+            xs = [p[0] for p in path_xy]
+            ys = [p[1] for p in path_xy]
+            plt.plot(xs, ys, linewidth=2.5, color="dodgerblue", alpha=0.95, label="shortest path")
+
+        # ===== Agent：红圆点 =====
+        cx, cy = cur_xy
+        plt.scatter([cx], [cy], s=90, c="red", marker="o", edgecolors="white", linewidths=1.0, label="agent")
+
+
+        theta = np.deg2rad(orientation)
+        dx = np.cos(theta)
+        dy = np.sin(theta)
+
+        # 箭头长度：建议用 stride 的一半或 1 个 stride
+        arrow_len = max(3, int(self.mapper._stride * 0.8))
+        ax = dx * arrow_len
+        ay = dy * arrow_len
+
+        # 在图像坐标系里 y 向下为正，dy>0 就是向下画，正好与 map 的 y 增加一致
+        plt.arrow(
+            cx, cy, ax, ay,
+            head_width=6,
+            head_length=8,
+            fc="yellow",
+            ec="yellow",
+            linewidth=2.0,
+            length_includes_head=True,
+            alpha=0.95
+        )
+
+
+        # ===== Goal (snapped)：绿叉 =====
+        if goal_snap_xy is not None:
+            gx, gy = goal_snap_xy
+            plt.scatter([gx], [gy], s=120, c="limegreen", marker="x", linewidths=2.5, label="goal(snap)")
+
+        # ===== Intermediate：橙三角 =====
+        if inter_xy is not None:
+            ix, iy = inter_xy
+            plt.scatter([ix], [iy], s=120, c="orange", marker="^", edgecolors="black", linewidths=0.8,
+                        label="intermediate")
+
+        # ===== Raw goal：紫加号（可选）=====
+        if goal_xy is not None:
+            rgx, rgy = int(goal_xy[0]), int(goal_xy[1])
+            if 0 <= rgx < W and 0 <= rgy < H:
+                plt.scatter([rgx], [rgy], s=80, c="magenta", marker="+", linewidths=2.0, label="goal(raw)")
+
+        plt.xlim([0, W - 1])
+        plt.ylim([H - 1, 0])
+        plt.legend(loc="lower right")
+        plt.tight_layout()
+
+        out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}.png")
+        plt.savefig(out_png, dpi=150)
+        plt.close(fig)
+
+        # 额外存路径坐标
+        out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
+        np.save(out_np, np.array(path_xy, dtype=np.int32))
+

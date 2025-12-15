@@ -72,7 +72,7 @@ class Mapper(nn.Module):
 
         return self._navigable_xs, self._navigable_ys
 
-    def reset(self,init_world_x=0.0, init_world_z=0.0):
+    def reset(self,init_world_x=0.0, init_world_z=0.0,init_yaw=0):
         self._geometric_map = np.zeros((self._internal_gm_size, self._internal_gm_size, 2))
         if self._use_acoustic_map:
             if self._am_encoding == 'intensity':
@@ -90,6 +90,7 @@ class Mapper(nn.Module):
         self._initial_orientation = self._orientation
         self._world_x0 = float(init_world_x)
         self._world_z0 = float(init_world_z)
+        self._yaw0_rad = float(init_yaw)
     @property
     def _rotation(self):
         # orientation increases clockwise, rotation increases counterclockwise
@@ -302,14 +303,34 @@ class Mapper(nn.Module):
 
         return ego_om
 
+    # def world_to_map(self, wx: float, wz: float):
+    #     dx = wx - self._world_x0
+    #     dz = wz - self._world_z0
+    #
+    #     mx = int(round(self._internal_gm_size / 2 + dx / self._gm_res))
+    #     my = int(round(self._internal_gm_size / 2 + dz / self._gm_res))
+    #     return mx, my
+
     def world_to_map(self, wx: float, wz: float):
+        """
+        world (x,z) -> internal global map index (mx,my)
+        考虑初始 yaw：把 world 平面位移先旋转到 map frame
+        """
         dx = wx - self._world_x0
         dz = wz - self._world_z0
 
-        mx = int(round(self._internal_gm_size / 2 + dx / self._gm_res))
-        my = int(round(self._internal_gm_size / 2 + dz / self._gm_res))
-        return mx, my
+        # 把世界增量旋转到“初始朝向对齐的 map frame”
+        # 注意：这里 yaw0 的正方向要与你取 yaw 的定义一致（Habitat 通常是左手/右手系差异）
+        c = np.cos(self._yaw0_rad)
+        s = np.sin(self._yaw0_rad)
 
+        # world -> map: rotate by -yaw0
+        mx_m =  c * dx - s * dz
+        my_m = s * dx + c * dz
+
+        mx = int(round(self._internal_gm_size / 2 + mx_m / self._gm_res))
+        my = int(round(self._internal_gm_size / 2 + my_m / self._gm_res))
+        return mx, my
 
 
 def rotate_map(om: np.array, rotation: float, create_copy=True) -> np.array:

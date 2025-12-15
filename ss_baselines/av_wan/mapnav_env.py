@@ -55,6 +55,7 @@ class MapNavEnv(habitat.RLEnv):
 
     def step(self, *args, **kwargs):
         world_goal = kwargs["action"]
+        # num_step = kwargs["step"]
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
         _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
         # intermediate_goal = self.planner.goal_to_intermediate_goal(goal)
@@ -63,7 +64,7 @@ class MapNavEnv(habitat.RLEnv):
         # print(goal,self.planner.mapper._world_x0,self.planner.mapper._world_z0,)
         # stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
         agent_pose = kwargs["agent_pos"]
-        stop = np.linalg.norm(world_goal - agent_pose) < 1.0
+        stop = np.linalg.norm(world_goal - agent_pose) <=0.5
 
         observation = self._previous_observation
         cumulative_reward = 0

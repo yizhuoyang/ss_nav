@@ -9,3 +9,5 @@ my_script
 .vscode/
 /weights
 *.mp3
+/video
+/debug_plan

@@ -583,7 +583,9 @@ class PPOTrainer(BaseRLTrainer):
             if pose_all[-1]==0:
                 state = sim.get_agent_state()
                 current_position = state.position
-                self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1])
+                angle          = state.rotation
+                angle             = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
+                self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
 
             state = sim.get_agent_state()
             current_position = state.position
@@ -592,7 +594,7 @@ class PPOTrainer(BaseRLTrainer):
                 "action": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }
-            print(source_loc,current_position)
+            print(source_loc,current_position,angle)
             actions = [data]
             outputs = self.envs.step(actions)
             ######### Suppose the location of the sound source is known ################
