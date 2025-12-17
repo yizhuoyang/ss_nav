@@ -14,8 +14,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 from soundspaces.utils import load_metadata
-from ss_baselines.savi.pretraining.audiogoal_predictor import AudioGoalPredictor
-from ss_baselines.savi.pretraining.audiogoal_dataset import AudioGoalDataset
+from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPredictor
+from ss_baselines.savi.pretraining_ours.audiogoal_dataset import AudioGoalDataset
 from ss_baselines.savi.config.default import get_config
 from soundspaces.mp3d_utils import SCENE_SPLITS
 
@@ -72,8 +72,16 @@ class AudioGoalPredictorTrainer:
         regressor_criterion = nn.MSELoss().to(device=self.device)
         classifier_criterion = nn.CrossEntropyLoss().to(device=self.device)
         model = self.audiogoal_predictor
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()))
+        # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()))
 
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=self.lr,
+            weight_decay=(self.weight_decay or 0.0),
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.num_epoch, eta_min=1e-6
+        )
         # training params
         since = time.time()
         best_acc = 0
@@ -87,6 +95,7 @@ class AudioGoalPredictorTrainer:
             for split in splits:
                 if split == 'train':
                     self.audiogoal_predictor.train()  # Set model to training mode
+
                 else:
                     self.audiogoal_predictor.eval()  # Set model to evaluate mode
 
@@ -128,7 +137,7 @@ class AudioGoalPredictorTrainer:
                     if split == 'train':
                         loss.backward()
                         optimizer.step()
-
+                        scheduler.step()
                     running_total_loss += loss.item() * gts.size(0)
                     running_classifier_loss += classifier_loss.item() * gts.size(0)
                     running_regressor_loss += regressor_loss.item() * gts.size(0)
@@ -248,7 +257,7 @@ def main():
 
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
-        audiogoal_predictor_trainer.run(['train', 'test'], writer)
+        audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:
         ckpt = torch.load(os.path.join(args.model_dir, 'val_best.pth'))
         audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'])

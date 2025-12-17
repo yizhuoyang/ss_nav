@@ -21,9 +21,10 @@ class AudioGoalPredictor(nn.Module):
         self.input_shape_printed = False
         self.predictor = models.resnet18(pretrained=True)
         self.predictor.conv1 = nn.Conv2d(2, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        output_size = (21 if predict_label else 0) + (2 if predict_location else 0)
-        self.predictor.fc = nn.Linear(512, output_size)
-
+        # output_size = (21 if predict_label else 0) + (2 if predict_location else 0)
+        # self.predictor.fc = nn.Linear(512, output_size)
+        self.doa_head = nn.Linear(512,360)
+        self.dis_head = nn.Linear(512,120)
         self.last_global_coords = None
 
     def forward(self, audio_feature):
@@ -33,10 +34,15 @@ class AudioGoalPredictor(nn.Module):
         audio_observations = audio_feature['spectrogram']
         if not torch.is_tensor(audio_observations):
             audio_observations = torch.from_numpy(audio_observations).to(device='cuda:0').unsqueeze(0)
-
         # permute tensor to dimension [BATCH x CHANNEL x HEIGHT X WIDTH]
         audio_observations = audio_observations.permute(0, 3, 1, 2)
-        return self.predictor(audio_observations)
+        audio_feature = self.predictor(audio_observations)
+        predicted_doa = self.doa_head(audio_feature)
+        # predicted_doa = torch.sigmoid(predicted_doa)
+        predicted_dis = self.dis_head(audio_feature)
+        predicted_dis = torch.sigmoid(predicted_dis)
+        return predicted_doa,predicted_doa
+        # return self.predictor(audio_observations)
 
     def update(self, observations, envs, predict_location):
         """
