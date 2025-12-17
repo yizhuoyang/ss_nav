@@ -105,6 +105,7 @@ def main():
 
     if args.run_type == "train":
         trainer.train()
+        # trainer.eval(args.eval_interval, args.prev_ckpt_ind, config.USE_LAST_CKPT)
     elif args.run_type == "eval":
         trainer.eval(args.eval_interval, args.prev_ckpt_ind, config.USE_LAST_CKPT)
 

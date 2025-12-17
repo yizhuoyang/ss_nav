@@ -105,7 +105,6 @@ class Planner:
         collided = to_array(observation['collision'][0])
 
         intensity = to_array(observation['intensity'][0]) if 'intensity' in observation else None
-
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
 
         if not collided:
@@ -181,8 +180,8 @@ class Planner:
         tgt_node = self._node_id(ggx, ggy)
 
 
-        # if cur_node in self._graph and tgt_node in self._graph:
-        #     print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
+        if cur_node in self._graph and tgt_node in self._graph:
+            print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
 
         # 2) ensure current node exists
         if cur_node not in self._graph:
@@ -191,40 +190,28 @@ class Planner:
             self._prev_action = action
             return action
 
-        # 3) if goal node not in graph / not reachable -> project to nearest reachable node
-        if tgt_node not in self._graph or not nx.has_path(self._graph, cur_node, tgt_node):
-            nn = self._nearest_reachable_node((ggx, ggy), cur_node)
-            if nn is None:
-                action = HabitatSimActions.TURN_LEFT
-                self._prev_next_node = None
-                self._prev_action = action
-                return action
-            tgt_node = nn
-
-        # 4) shortest path
-        try:
-            path = nx.shortest_path(self._graph, source=cur_node, target=tgt_node)
-        except (nx.exception.NetworkXNoPath, nx.exception.NodeNotFound):
+        frontier_node = self._pick_frontier_node(geometric_map, cur_node, (gx, gy))
+        if frontier_node is None:
             action = HabitatSimActions.TURN_LEFT
-            self._prev_next_node = None
+            print("no frontier")
             self._prev_action = action
             return action
 
-        if len(path) <= 1:
-            action = HabitatSimActions.STOP
-            self._prev_next_node = None
-            self._prev_action = action
-            return action
+        inter_xy = self._graph.nodes[frontier_node]["map_index"]
+        try:
+            path = nx.shortest_path(self._graph, source=cur_node, target=frontier_node)
+            if len(path) >= 2:
+                lookahead = 10
+                idx = min(lookahead, len(path) - 1)
+                inter_xy = self._graph.nodes[path[idx]]["map_index"]
+        except Exception:
+            pass
 
-        lookahead = 10
-        idx = min(lookahead, len(path) - 1)
-        if idx < 1:
-            idx = 1
-        inter_node = path[idx]
-        inter_xy = self._graph.nodes[inter_node]["map_index"]
-        print( self._graph.nodes[path[1]]["map_index"],x,y)
+        # ===== 动作：能 forward 就 forward，否则按左右转向 =====
+        fx, fy = self._forward_xy(xg, yg, orientation)
+        can_fwd = self._can_move_to(xg, yg, fx, fy)
 
-        # ===== debug draw =====
+
         if (self._debug_step % self._debug_every) == 0:
             self._plot_plan_debug(
                 geometric_map=geometric_map,
@@ -238,34 +225,11 @@ class Planner:
             )
         self._debug_step += 1
 
-        def graph_dist_from_mapxy_to_inter(x_map, y_map):
-            n = self._map_index_to_graph_nodes([(x_map, y_map)])[0]
-            if n not in self._graph:
-                return 10**9
-            try:
-                return nx.shortest_path_length(self._graph, n, inter_node)
-            except Exception:
-                return 10**9
-
-
-        cur_d = graph_dist_from_mapxy_to_inter(xg, yg)
-
-        xg, yg = self._snap_to_navigable_grid(x, y)
-
-        # 前进一步坐标
-        s = self.mapper._stride
-        fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
-        fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
-
-        can_fwd = self._can_move_to(xg, yg, fx, fy)
-        # can_fwd = self.check_navigability((fx,fy))
-
-        f_d = graph_dist_from_mapxy_to_inter(fx, fy) if can_fwd else 10**9
-        #
-        if can_fwd and (f_d < cur_d):
+        if can_fwd:
             action = HabitatSimActions.MOVE_FORWARD
             self._prev_action = action
             return action
+
 
         next_node_idx = self._graph.nodes[path[1]]['map_index']
         self._prev_next_node = path[1]
@@ -596,10 +560,17 @@ class Planner:
         exp = geometric_map[:, :, 1] > 0.5   # explored
 
         # ===== 背景 RGB 图（固定颜色）=====
+        # unexplored: dark gray, explored free: white, explored obstacle: black
         bg = np.zeros((H, W, 3), dtype=np.uint8)
-        bg[:, :, :] = 60  # 未探索：深灰
-        bg[exp & (~obs)] = np.array([255, 255, 255], dtype=np.uint8)  # explored free
-        bg[exp & (obs)]  = np.array([0, 0, 0], dtype=np.uint8)        # explored obstacle
+
+        # 未探索：深灰
+        bg[:, :, :] = 60
+
+        # 已探索自由：白
+        bg[exp & (~obs)] = np.array([255, 255, 255], dtype=np.uint8)
+
+        # 已探索障碍：黑
+        bg[exp & (obs)] = np.array([0, 0, 0], dtype=np.uint8)
 
         # ===== path nodes -> (x,y) =====
         path_xy = []
@@ -616,24 +587,23 @@ class Planner:
         if len(path_xy) >= 2:
             xs = [p[0] for p in path_xy]
             ys = [p[1] for p in path_xy]
-            plt.plot(xs, ys, linewidth=2.5, color="dodgerblue", alpha=0.95,
-                     label=f"shortest path (len={len(path_xy)})")
+            plt.plot(xs, ys, linewidth=2.5, color="dodgerblue", alpha=0.95, label="shortest path")
 
         # ===== Agent：红圆点 =====
         cx, cy = cur_xy
-        plt.scatter([cx], [cy], s=90, c="red", marker="o",
-                    edgecolors="white", linewidths=1.0,
-                    label=f"agent (x,y)=({cx},{cy})  ori={int(orientation)}°")
+        plt.scatter([cx], [cy], s=90, c="red", marker="o", edgecolors="white", linewidths=1.0, label="agent")
 
-        # ===== 朝向箭头：黄色 =====
+
         theta = np.deg2rad(orientation)
         dx = np.cos(theta)
         dy = np.sin(theta)
 
+        # 箭头长度：建议用 stride 的一半或 1 个 stride
         arrow_len = max(3, int(self.mapper._stride * 0.8))
         ax = dx * arrow_len
         ay = dy * arrow_len
 
+        # 在图像坐标系里 y 向下为正，dy>0 就是向下画，正好与 map 的 y 增加一致
         plt.arrow(
             cx, cy, ax, ay,
             head_width=6,
@@ -645,66 +615,70 @@ class Planner:
             alpha=0.95
         )
 
+
         # ===== Goal (snapped)：绿叉 =====
         if goal_snap_xy is not None:
             gx, gy = goal_snap_xy
-            plt.scatter([gx], [gy], s=120, c="limegreen", marker="x",
-                        linewidths=2.5,
-                        label=f"goal(snap) (x,y)=({gx},{gy})")
+            plt.scatter([gx], [gy], s=120, c="limegreen", marker="x", linewidths=2.5, label="goal(snap)")
 
         # ===== Intermediate：橙三角 =====
         if inter_xy is not None:
             ix, iy = inter_xy
-            plt.scatter([ix], [iy], s=120, c="orange", marker="^",
-                        edgecolors="black", linewidths=0.8,
-                        label=f"intermediate (x,y)=({ix},{iy})")
+            plt.scatter([ix], [iy], s=120, c="orange", marker="^", edgecolors="black", linewidths=0.8,
+                        label="intermediate")
 
         # ===== Raw goal：紫加号（可选）=====
         if goal_xy is not None:
             rgx, rgy = int(goal_xy[0]), int(goal_xy[1])
             if 0 <= rgx < W and 0 <= rgy < H:
-                plt.scatter([rgx], [rgy], s=80, c="magenta", marker="+",
-                            linewidths=2.0,
-                            label=f"goal(raw) (x,y)=({rgx},{rgy})")
+                plt.scatter([rgx], [rgy], s=80, c="magenta", marker="+", linewidths=2.0, label="goal(raw)")
 
         plt.xlim([0, W - 1])
         plt.ylim([H - 1, 0])
-
-        # 让 legend 更紧凑一点
-        plt.legend(loc="lower right", fontsize=9, framealpha=0.85)
+        plt.legend(loc="lower right")
         plt.tight_layout()
 
         out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}.png")
         plt.savefig(out_png, dpi=150)
         plt.close(fig)
 
+        # 额外存路径坐标
         out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
         np.save(out_np, np.array(path_xy, dtype=np.int32))
 
+    def _get_frontier_mask(self, geometric_map):
+        # explored/free
+        explored = geometric_map[:, :, 1] > 0.5
+        free     = geometric_map[:, :, 0] <= 0.5
+
+        # 4-neighbor has unexplored
+        unexplored = ~explored
+        up    = np.pad(unexplored[1:, :],  ((0,1),(0,0)), constant_values=False)
+        down  = np.pad(unexplored[:-1,:],  ((1,0),(0,0)), constant_values=False)
+        left  = np.pad(unexplored[:,1:],   ((0,0),(0,1)), constant_values=False)
+        right = np.pad(unexplored[:,:-1],  ((0,0),(1,0)), constant_values=False)
+        neigh_unexp = up | down | left | right
+
+        frontier = explored & free & neigh_unexp
+        return frontier
 
     def _pick_frontier_node(self, geometric_map, cur_node, goal_xy, max_samples=3000, step=4,
                             w_goal=1.0, w_agent=0.2):
         gx, gy = goal_xy
-
         frontier = self._get_frontier_mask(geometric_map)
-
-        # 当前连通块（保证可达）
         comp = nx.node_connected_component(self._graph, cur_node)
-
-        # 从 comp 里抽取 frontier 节点（用 graph 的 node->map_index，不用全图扫，快很多）
         cand = []
         for n in comp:
             x2, y2 = self._graph.nodes[n]["map_index"]
             if frontier[y2, x2]:
                 cand.append(n)
-
+                print("have available data")
         if len(cand) == 0:
             return None
 
         # 下采样，避免太多 frontier
         if len(cand) > max_samples:
             cand = cand[::step]
-
         # 当前点
         cx, cy = self._graph.nodes[cur_node]["map_index"]
 

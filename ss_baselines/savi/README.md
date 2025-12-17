@@ -41,3 +41,7 @@ If you use this model in your research, please cite the following paper:
 
 [//]: # (python ss_baselines/savi/run.py --run-type eval --exp-config ss_baselines/savi/config/semantic_audionav/savi.yaml EVAL_CKPT_PATH_DIR data/pretrained_weights/semantic_audionav/savi/best_val.pth EVAL.SPLIT test USE_SYNC_VECENV True RL.DDPPO.pretrained False )
 <!-- python ss_baselines/savi/run.py --run-type eval --exp-config ss_baselines/savi/config/semantic_audionav/savi.yaml EVAL_CKPT_PATH_DIR data/pretrained_weights/semantic_audionav/savi/best_val.pth EVAL.SPLIT test USE_SYNC_VECENV True RL.DDPPO.pretrained False TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False VIDEO_OPTION [\"disk\"] TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False TEST_EPISODE_COUNT 2 -->
+
+```
+ python ss_baselines/savi/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/savi/config/semantic_audionav/savi.yaml EVAL_CKPT_PATH_DIR data/pretrained_weights/semantic_audionav/savi/best_val.pth EVAL.SPLIT test USE_SYNC_VECENV True RL.DDPPO.pretrained False TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False VIDEO_OPTION [\"disk\"] TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"POSE_SENSOR\",\"EGOMAP_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] EXTRA_RGB True TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False DISPLAY_RESOLUTION 512 TEST_EPISODE_COUNT 2 TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False RL.PPO.use_belief_predictor False VIDEO_DIR /home/Disk/yyz/sound-spaces/video_sem
+```

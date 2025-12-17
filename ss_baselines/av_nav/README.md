@@ -24,3 +24,10 @@ If you use this model in your research, please cite the following paper:
 }
 ```
  python ss_baselines/av_nav/run.py --run-type eval --exp-config /home/Disk/sound-space/ss_baselines/av_nav/config/audionav/mp3d/val_telephone/audiogoal_depth.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_nav/mp3d/heard.pth VIDEO_OPTION [\"disk\"] TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] EXTRA_RGB True TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False DISPLAY_RESOLUTION 512 TEST_EPISODE_COUNT 2
+
+
+python ss_baselines/av_nav/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_nav/config/semantic_audionav/mp3d/rgbd_ddppo.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_nav/mp3d/heard.pth VIDEO_OPTION [\"disk\"] TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] EXTRA_RGB True TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False DISPLAY_RESOLUTION 512 TEST_EPISODE_COUNT 2 VIDEO_DIR /home/Disk/yyz/sound-spaces/video_sem
+
+```
+python ss_baselines/av_nav/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_nav/config/semantic_audionav/mp3d/rgbd_ddppo.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_nav/mp3d/heard.pth VIDEO_OPTION [\"disk\"] TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"POSE_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] EXTRA_RGB True TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False DISPLAY_RESOLUTION 512 TEST_EPISODE_COUNT 2 VIDEO_DIR /home/Disk/yyz/sound-spaces/video_sem
+```

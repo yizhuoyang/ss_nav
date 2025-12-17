@@ -203,7 +203,7 @@ class Planner:
 
         # 4) shortest path
         try:
-            path = nx.shortest_path(self._graph, source=cur_node, target=tgt_node)
+            path = self._choose_best_shortest_path(cur_node, tgt_node, xg, yg, orientation, max_paths=200, K=6)
         except (nx.exception.NetworkXNoPath, nx.exception.NodeNotFound):
             action = HabitatSimActions.TURN_LEFT
             self._prev_next_node = None
@@ -727,3 +727,74 @@ class Planner:
         fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
         return self._snap_to_navigable_grid(fx, fy)
 
+    def _forward_cell(self, xg, yg, orientation):
+        s = self.mapper._stride
+        fx = xg + int(round(s * np.cos(np.deg2rad(orientation))))
+        fy = yg + int(round(s * np.sin(np.deg2rad(orientation))))
+        return self._snap_to_navigable_grid(fx, fy)
+
+    def _path_turn_cost(self, path_nodes, xg, yg, orientation, K=6):
+        """
+        给一条最短路打分：越小越好
+        - 强烈偏好第一步就是 forward（不需要转）
+        - 统计前K步需要的转弯次数（90度 turn 次数）
+        """
+        if len(path_nodes) < 2:
+            return 10**9
+
+        # 把前K步转成 map_index 序列（包含当前点）
+        pts = [(xg, yg)]
+        for i in range(1, min(len(path_nodes), K + 1)):
+            pts.append(tuple(self._graph.nodes[path_nodes[i]]["map_index"]))
+
+        # 当前朝向
+        ori = orientation
+        cost = 0
+
+        # 如果第一步正好是 forward，给巨大奖励（cost减小）
+        fwd = self._forward_cell(xg, yg, ori)
+        if len(pts) >= 2 and tuple(pts[1]) == tuple(fwd):
+            cost -= 1000  # huge bonus
+
+        # 逐步模拟：从 pts[t] -> pts[t+1] 所需的转向次数
+        for t in range(len(pts) - 1):
+            x0, y0 = pts[t]
+            x1, y1 = pts[t + 1]
+            desired = (np.rad2deg(np.arctan2(y1 - y0, x1 - x0)) % 360)
+            rot = (desired - ori) % 360
+
+            # rot 只可能接近 0/90/180/270
+            if rot == 0:
+                pass
+            elif rot == 90:
+                cost += 1
+                ori = (ori + 90) % 360
+            elif rot == 270:
+                cost += 1
+                ori = (ori - 90) % 360
+            elif rot == 180:
+                # 180 需要两次 turn（无论左/右）
+                cost += 2
+                # 随便更新一个方向即可（不影响 cost 的比较太多）
+                ori = (ori + 180) % 360
+            else:
+                cost += 3  # 异常兜底
+
+        return cost
+
+    def _choose_best_shortest_path(self, cur_node, tgt_node, xg, yg, orientation, max_paths=200, K=6):
+        """
+        从所有最短路径里选一条“更符合当前朝向/更少转弯”的
+        """
+        best = None
+        best_cost = 10**18
+        cnt = 0
+        for p in nx.all_shortest_paths(self._graph, source=cur_node, target=tgt_node):
+            cost = self._path_turn_cost(p, xg, yg, orientation, K=K)
+            if cost < best_cost:
+                best_cost = cost
+                best = p
+            cnt += 1
+            if cnt >= max_paths:  # 防止路径数量爆炸
+                break
+        return best

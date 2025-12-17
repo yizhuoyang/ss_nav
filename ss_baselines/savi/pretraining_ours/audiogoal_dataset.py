@@ -37,7 +37,7 @@ class AudioGoalDataset(Dataset):
             for subgraph in subgraphs:
                 sr_pairs += list(product(subgraph, subgraph))
             random.shuffle(sr_pairs)
-            for s, r in sr_pairs[:10000]:
+            for s, r in sr_pairs[:500]:
                 sound_file = random.choice(sound_files)
                 index = CATEGORY_INDEX_MAPPING[sound_file[:-4]]
                 angle = random.choice([0, 90, 180, 270])

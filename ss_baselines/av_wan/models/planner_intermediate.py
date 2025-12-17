@@ -283,12 +283,12 @@ class Planner:
 
         ld = graph_dist_from_mapxy_to_inter(lfx, lfy)
         rd = graph_dist_from_mapxy_to_inter(rfx, rfy)
-        print("pose:", (x, y, orientation))
-        print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
-        print("init_x:",self.mapper._world_x0,"init_z:",self.mapper._world_z0)
-        print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
-        print(can_fwd,f_d,cur_d,ld,rd)
-        print(xg,yg,fx,fy)
+        # print("pose:", (x, y, orientation))
+        # print("snapped:", (xg, yg), "goal_snap:", (ggx, ggy),"inter_xy:",inter_xy)
+        # print("init_x:",self.mapper._world_x0,"init_z:",self.mapper._world_z0)
+        # print("cur_inG:", cur_node in self._graph, "tgt_inG:", tgt_node in self._graph)
+        # print(can_fwd,f_d,cur_d,ld,rd)
+        # print(xg,yg,fx,fy)
         # 如果某一侧转了以后“下一步更接近”，优先转向那一侧
         if ld < rd:
             action = HabitatSimActions.TURN_LEFT

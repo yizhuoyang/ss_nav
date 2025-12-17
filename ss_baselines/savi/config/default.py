@@ -58,7 +58,7 @@ _C.CONTINUOUS = False
 # -----------------------------------------------------------------------------
 _C.EVAL = CN()
 # The split to evaluate on
-_C.EVAL.SPLIT = "val"
+_C.EVAL.SPLIT = "train"
 _C.EVAL.USE_CKPT_CONFIG = True
 # -----------------------------------------------------------------------------
 # REINFORCEMENT LEARNING (RL) ENVIRONMENT CONFIG
@@ -197,7 +197,15 @@ _TC.TASK.LOCATION_BELIEF = SIMULATOR_SENSOR.clone()
 _TC.TASK.LOCATION_BELIEF.TYPE = "LocationBelief"
 _TC.TASK.SUCCESS_WHEN_SILENT = CN()
 _TC.TASK.SUCCESS_WHEN_SILENT.TYPE = "SWS"
+
 # -----------------------------------------------------------------------------
+# Egocentric occupancy map projected from depth image
+_TC.TASK.EGOMAP_SENSOR = SIMULATOR_SENSOR.clone()
+_TC.TASK.EGOMAP_SENSOR.TYPE = "EgoMap"
+_TC.TASK.EGOMAP_SENSOR.MAP_SIZE = 31
+_TC.TASK.EGOMAP_SENSOR.MAP_RESOLUTION = 0.1
+_TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (0.5, 2.0)
+
 # POSE SENSOR
 # -----------------------------------------------------------------------------
 _TC.TASK.POSE_SENSOR = CN()
@@ -286,6 +294,9 @@ def get_config(
         elif config.EVAL.SPLIT.startswith('test'):
             # config.TEST_EPISODE_COUNT = 1000
             config.TEST_EPISODE_COUNT = 4
+        elif config.EVAL.SPLIT.startswith('train'):
+            config.TEST_EPISODE_COUNT = 1000
+            # config.TEST_EPISODE_COUNT = 4
         else:
             raise ValueError('Dataset split must starts with train, val or test!')
         config.freeze()

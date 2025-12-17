@@ -11,3 +11,5 @@ my_script
 *.mp3
 /video
 /debug_plan
+/video_gt
+/video_sem

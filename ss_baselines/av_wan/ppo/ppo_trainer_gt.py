@@ -16,7 +16,7 @@ import random
 import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
-from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
+from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame
 from ssl_net_infer import SSLNet
 import numpy as np
 import torch
@@ -473,17 +473,6 @@ class PPOTrainer(BaseRLTrainer):
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
-
-
-        ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly_none/last_model.pth'
-        model = SSLNet(use_compress=False).to(self.device)
-        ckpt = torch.load(CKPT_PATH, map_location=self.device)
-        model.load_state_dict(ckpt)
-        print(f"Loaded checkpoint from {CKPT_PATH}")
-        model.eval()
-        ############### Load SSL model and checkpoint ##################
-
         if self.config.EVAL.USE_CKPT_CONFIG:
             config = self._setup_eval_config(ckpt_dict["config"])
         else:
@@ -612,18 +601,6 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-
-        H_l, W_l = 64, 64
-        meters_per_pixel = 1.0
-
-        refiner = GlobalSoundMapRefiner(
-            H_l=H_l,
-            W_l=W_l,
-            meters_per_pixel=meters_per_pixel,
-            decay=0.8,
-            prior_prob=0.01,
-        )
-
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
                 and self.envs.num_envs > 0
@@ -638,29 +615,13 @@ class PPOTrainer(BaseRLTrainer):
                 angle          = state.rotation
                 angle             = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
                 self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
-                refiner.reset()
+
 
             state = sim.get_agent_state()
             current_position = state.position
-            current_rotation = state.rotation
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-
-            spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-            predicted_heatmap = model(spectrogram,depth)
-            pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
-            pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
-
-            agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
-            
-            max_x_world, max_z_world = localmap_argmax_world(pred_prob, agent_x, agent_z, heading, meters_per_pixel)
-            
-            # _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
-            # print("!!!!!!!!!!!!!!")
-            print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
-
             data = {
-                "action": np.array([max_x_world,max_z_world]),
+                "action": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }
             print(source_loc,current_position,angle)
