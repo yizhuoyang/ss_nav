@@ -54,7 +54,7 @@ class AudioGoalPredictorTrainer:
                 scene_graphs=scene_graphs,
                 scenes=scenes,
                 split=split,
-                use_polar_coordinates=False,
+                use_polar_coordinates=True,
                 use_cache=True
             )
             #TODO YYZ
@@ -64,6 +64,7 @@ class AudioGoalPredictorTrainer:
                                             pin_memory=True,
                                             num_workers=self.num_worker,
                                             sampler=None,
+
                                             )
 
             dataset_sizes[split] = len(datasets[split])
@@ -84,7 +85,7 @@ class AudioGoalPredictorTrainer:
         )
         # training params
         since = time.time()
-        best_acc = 0
+        best_acc = 10000
         best_model_wts = None
         num_epoch = self.num_epoch if 'train' in splits else 1
         for epoch in range(num_epoch):
@@ -112,13 +113,14 @@ class AudioGoalPredictorTrainer:
 
                     # remove alpha channel
                     inputs = [x.to(device=self.device, dtype=torch.float) for x in inputs]
-                    gts = gts.to(device=self.device, dtype=torch.float)
-
+                    # gts = gts.to(device=self.device, dtype=torch.float)
+                    theta_gt, dist_gt = gts
+                    theta_gt = theta_gt.to(device=self.device, dtype=torch.float)
+                    dist_gt = dist_gt.to(device=self.device, dtype=torch.float)
                     # zero the parameter gradients
                     optimizer.zero_grad()
-
                     # forward
-                    predicts = model({input_type: x for input_type, x in zip(['spectrogram'], inputs)})
+                    predicts_doa,predicts_dis = model({input_type: x for input_type, x in zip(['spectrogram'], inputs)})
 
                     if self.predict_label and self.predict_location:
                         classifier_loss = classifier_criterion(predicts[:, :-2], gts[:, 0].long())
@@ -127,7 +129,7 @@ class AudioGoalPredictorTrainer:
                         classifier_loss = classifier_criterion(predicts, gts[:, 0].long())
                         regressor_loss = torch.tensor([0], device=self.device)
                     elif self.predict_location:
-                        regressor_loss = regressor_criterion(predicts, gts[:, -2:])
+                        regressor_loss = regressor_criterion(predicts_doa, theta_gt)+0.2*regressor_criterion(predicts_dis, dist_gt)
                         classifier_loss = torch.tensor([0], device=self.device)
                     else:
                         raise ValueError('Must predict one item.')
@@ -138,14 +140,25 @@ class AudioGoalPredictorTrainer:
                         loss.backward()
                         optimizer.step()
                         scheduler.step()
-                    running_total_loss += loss.item() * gts.size(0)
-                    running_classifier_loss += classifier_loss.item() * gts.size(0)
-                    running_regressor_loss += regressor_loss.item() * gts.size(0)
+                    running_total_loss += loss.item() * theta_gt.size(0)
+                    running_classifier_loss += classifier_loss.item() * theta_gt.size(0)
+                    running_regressor_loss += regressor_loss.item() * theta_gt.size(0)
 
-                    pred_x = np.round(predicts.cpu().detach().numpy())
-                    pred_y = np.round(predicts.cpu().detach().numpy())
-                    gt_x = np.round(gts.cpu().numpy())
-                    gt_y = np.round(gts.cpu().numpy())
+                    pred_doa = predicts_doa.cpu().detach().numpy()
+                    pred_doa = np.argmax(pred_doa,-1)
+                    pred_doa = np.round(pred_doa)
+
+                    pred_dis = predicts_dis.cpu().detach().numpy()
+                    pred_dis = np.argmax(pred_dis,-1)
+                    pred_dis = np.round(pred_dis)
+
+                    gt_doa = theta_gt.cpu().detach().numpy()
+                    gt_doa = np.argmax(gt_doa, -1)
+                    gt_doa = np.round(gt_doa)
+
+                    gt_dis = dist_gt.cpu().detach().numpy()
+                    gt_dis = np.argmax(gt_dis, -1)
+                    gt_dis = np.round(gt_dis)
 
                     # hard accuracy
                     if self.predict_label and self.predict_location:
@@ -158,9 +171,8 @@ class AudioGoalPredictorTrainer:
                             torch.argmax(torch.abs(predicts), dim=1) == gts[:, 0]).item()
                         running_regressor_corrects = 0
                     elif self.predict_location:
-                        running_regressor_corrects += np.sum(np.bitwise_and(
-                            pred_x[:, 0] == gt_x[:, -2], pred_y[:, 1] == gt_y[:, -1]))
-                        running_classifier_corrects = 0
+                        running_regressor_corrects += np.sum(gt_doa==pred_doa)
+                        running_classifier_corrects += np.sum(gt_dis==pred_dis)
 
                 epoch_total_loss = running_total_loss / dataset_sizes[split]
                 epoch_regressor_loss = running_regressor_loss / dataset_sizes[split]
@@ -173,20 +185,23 @@ class AudioGoalPredictorTrainer:
                     writer.add_scalar(f'Loss/{split}_regressor', epoch_regressor_loss, epoch)
                     writer.add_scalar(f'Accuracy/{split}_classifier', epoch_classifier_acc, epoch)
                     writer.add_scalar(f'Accuracy/{split}_regressor', epoch_regressor_acc, epoch)
+
+                # logging.info(f'{split.upper()} Total loss: {epoch_total_loss:.4f}')
+
                 logging.info(f'{split.upper()} Total loss: {epoch_total_loss:.4f}, '
                              f'label loss: {epoch_classifier_loss:.4f}, xy loss: {epoch_regressor_loss},'
                              f' label acc: {epoch_classifier_acc:.4f}, xy acc: {epoch_regressor_acc}')
 
-                # deep copy the model
-                if self.predict_label and self.predict_location:
-                    target_acc = epoch_regressor_acc + epoch_classifier_acc
-                elif self.predict_location:
-                    target_acc = epoch_regressor_acc
-                else:
-                    target_acc = epoch_classifier_acc
+                # # deep copy the model
+                # if self.predict_label and self.predict_location:
+                #     target_acc = epoch_regressor_acc + epoch_classifier_acc
+                # elif self.predict_location:
+                #     target_acc = epoch_regressor_acc
+                # else:
+                #     target_acc = epoch_classifier_acc
 
-                if split == 'val' and target_acc > best_acc:
-                    best_acc = target_acc
+                if split == 'val' and epoch_total_loss < best_acc:
+                    best_acc = epoch_total_loss
                     best_model_wts = copy.deepcopy(model.state_dict())
                     self.save_checkpoint(f"ckpt.{epoch}.pth")
 

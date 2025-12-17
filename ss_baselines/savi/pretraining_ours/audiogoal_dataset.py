@@ -4,7 +4,7 @@ from itertools import product
 import logging
 import copy
 import random
-
+import torch
 import librosa
 import numpy as np
 from torch.utils.data import Dataset
@@ -13,9 +13,11 @@ from tqdm import tqdm
 from scipy.io import wavfile
 from scipy.signal import fftconvolve
 from skimage.measure import block_reduce
-
+from ss_baselines.savi.config.default import get_config
 from ss_baselines.common.utils import to_tensor
 from soundspaces.mp3d_utils import CATEGORY_INDEX_MAPPING
+from soundspaces.mp3d_utils import SCENE_SPLITS
+from soundspaces.utils import load_metadata
 
 
 class AudioGoalDataset(Dataset):
@@ -27,7 +29,6 @@ class AudioGoalDataset(Dataset):
         use_polar_coordinates=False,
         use_cache=False,
         filter_rule='',
-        # ===== 新增：磁盘 cache 参数 =====
         cache_dir="/home/Disk/yyz/sound-spaces/cache",
         cache_name=None,
         rebuild_cache=False,
@@ -40,7 +41,7 @@ class AudioGoalDataset(Dataset):
         self.source_sound_dir = f'data/sounds/semantic_splits/{split}'
         self.source_sound_dict = {}
         self.rir_sampling_rate = 16000
-        self.num_samples_per   = 10000
+        self.num_samples_per   = 25000
 
         # ===== 1) 磁盘 cache 路径 =====
         os.makedirs(cache_dir, exist_ok=True)
@@ -60,6 +61,9 @@ class AudioGoalDataset(Dataset):
             # goals: float32 array (N,3)
             goals_np = data["goals"].astype(np.float32)
             self.goals = [to_tensor(g) for g in goals_np]
+
+            self.files = self.files
+            self.goals = self.goals
 
             # 可选保存一些 meta 以做一致性检查
             # meta = data["meta"].item() if "meta" in data else {}
@@ -180,8 +184,10 @@ class AudioGoalDataset(Dataset):
             rir_file, sound_file = self.files[item]
             audiogoal = self.compute_audiogoal(rir_file, sound_file)
             spectrogram = to_tensor(self.compute_spectrogram(audiogoal))
-            inputs_outputs = ([spectrogram], self.goals[item])
-
+            goal = self.goals[item]
+            theta = to_tensor(make_doa_gaussian(goal[0],goal[1]))
+            distance = to_tensor(make_r_gaussian_1d(goal[1]))
+            inputs_outputs = ([spectrogram], [theta,distance])
             if self.use_cache:
                 self.data[item] = inputs_outputs
         else:
@@ -237,43 +243,95 @@ class AudioGoalDataset(Dataset):
         spectrogram = np.stack([channel1_magnitude, channel2_magnitude], axis=-1)
         return spectrogram
 
-    @staticmethod
-    def make_doa_gaussian(
-        DOA: float,
-        num_bins: int = 360,
-        base_sigma_deg: float = 0.5,
-        sigma_scale_deg: float = 1.0,
-    ):
 
-        doa = DOA
-        if doa < 0:
-            doa += 2 * np.pi
-        dist_m = np.sqrt(front**2 + right**2)
-        sigma_deg = base_sigma_deg + sigma_scale_deg * dist_m
-        sigma_deg = max(sigma_deg, 1e-3)
-        sigma_rad = np.deg2rad(sigma_deg)
+def make_doa_gaussian(
+    DOA: float,
+    dist_m: float,
+    num_bins: int = 360,
+    base_sigma_deg: float = 0.5,
+    sigma_scale_deg: float = 1.0,
+):
 
-        angles = np.linspace(0.0, 2 * np.pi, num_bins, endpoint=False)  # (num_bins,)
+    doa = DOA
+    if doa < 0:
+        doa += 2 * np.pi
+    sigma_deg = base_sigma_deg + sigma_scale_deg * dist_m
+    sigma_deg = max(sigma_deg, 1e-3)
+    sigma_rad = np.deg2rad(sigma_deg)
 
-        diff = np.angle(np.exp(1j * (angles - doa)))  # [-pi, pi)
-        doa_gauss = np.exp(- (diff ** 2) / (2 * sigma_rad ** 2))
-        s = doa_gauss.sum()
-        if s > 0:
-            doa_gauss = doa_gauss / s
+    angles = np.linspace(0.0, 2 * np.pi, num_bins, endpoint=False)  # (num_bins,)
 
-        doa_gauss = (doa_gauss - doa_gauss.min()) / (doa_gauss.max() - doa_gauss.min() + 1e-8)
+    diff = np.angle(np.exp(1j * (angles - doa.detach().cpu().numpy())))  # [-pi, pi)
+    doa_gauss = np.exp(- (diff ** 2) / (2 * sigma_rad ** 2))
+    s = doa_gauss.sum()
+    if s > 0:
+        doa_gauss = doa_gauss / s
 
-        return doa_gauss
+    doa_gauss = (doa_gauss - doa_gauss.min()) / (doa_gauss.max() - doa_gauss.min() + 1e-8)
 
-    def make_r_gaussian_1d(r, num_bins=120, r_min=0.0, r_max=30.0,
-                           base_sigma=0.05, sigma_scale=0.2):
+    return doa_gauss
+
+def make_r_gaussian_1d(r, num_bins=120, r_min=0.0, r_max=30.0,
+                       base_sigma=0.05, sigma_scale=0.2):
+
+    r = r.detach().cpu().numpy()
+    r_axis = np.linspace(r_min, r_max, num_bins).astype(np.float32)
+    sigma = base_sigma + sigma_scale * r
+    sigma = max(sigma, 1e-3)
+    probs = np.exp(-0.5 * ((r_axis - r) / sigma)**2)
+    if probs.sum() > 0:
+        probs /= probs.sum()
+    probs = (probs - probs.min()) / (probs.max() - probs.min() + 1e-8)
+    return probs
 
 
-        r_axis = np.linspace(r_min, r_max, num_bins).astype(np.float32)
-        sigma = base_sigma + sigma_scale * r
-        sigma = max(sigma, 1e-3)
-        probs = np.exp(-0.5 * ((r_axis - r) / sigma)**2)
-        if probs.sum() > 0:
-            probs /= probs.sum()
-        probs = (probs - probs.min()) / (probs.max() - probs.min() + 1e-8)
-        return probs
+if __name__ == "__main__":
+    DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    CONFIG_PATH = "/home/Disk/sound-space/ss_baselines/savi/config/semantic_audionav/savi.yaml"
+    SPLIT = "train"  # "train" / "val" / "test"
+    USE_CACHE = True  # 建议 inference 时 False，避免占用巨大内存
+    PREDICT_LABEL = False
+    PREDICT_LOCATION = True
+    CKPT_PATH = "/home/Disk/yyz/sound-spaces/weights/savi/best_val.pth"  # or None
+
+    config = get_config(config_paths=CONFIG_PATH, opts=None, run_type=None)
+    meta_dir = config.TASK_CONFIG.SIMULATOR.AUDIO.METADATA_DIR
+
+    scenes = SCENE_SPLITS[SPLIT]
+
+    scene_graphs = {}
+    for scene in scenes:
+        points, graph = load_metadata(os.path.join(meta_dir, "mp3d", scene))
+        scene_graphs[scene] = graph
+
+    dataset = AudioGoalDataset(
+        scene_graphs=scene_graphs,
+        scenes=scenes,
+        split=SPLIT,
+        use_polar_coordinates=True,
+        use_cache=USE_CACHE,
+    )
+
+    print(f"[INFO] dataset split={SPLIT}, len={len(dataset)}")
+
+    # -----------------------
+    # 3) 构建模型 + 可选加载权重
+    # # -----------------------
+    # model = AudioGoalPredictor(
+    #     predict_label=PREDICT_LABEL,
+    #     predict_location=PREDICT_LOCATION
+    # ).to(DEVICE)
+    # model.eval()
+    #
+    # if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
+    #     ckpt = torch.load(CKPT_PATH, map_location="cpu")
+    #     # 你的 trainer 存的是 {"audiogoal_predictor": state_dict}
+    #     if "audiogoal_predictor" in ckpt:
+    #         model.load_state_dict(ckpt["audiogoal_predictor"], strict=True)
+    #         print(f"[INFO] loaded ckpt: {CKPT_PATH}")
+    #     else:
+    #         # 万一你保存的是裸 state_dict
+    #         model.load_state_dict(ckpt, strict=True)
+    #         print(f"[INFO] loaded ckpt (raw state_dict): {CKPT_PATH}")
+    # else:
+    #     print("[WARN] ckpt not loaded (path is None or not exists).")

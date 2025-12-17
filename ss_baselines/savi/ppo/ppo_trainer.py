@@ -677,7 +677,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(SEED)
         np.random.seed(SEED)
         torch.manual_seed(SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data_semantic/train'
+        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val'
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 

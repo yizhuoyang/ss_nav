@@ -22,7 +22,7 @@ class AudioGoalPredictor(nn.Module):
         self.predictor = models.resnet18(pretrained=True)
         self.predictor.conv1 = nn.Conv2d(2, 64, kernel_size=7, stride=2, padding=3, bias=False)
         # output_size = (21 if predict_label else 0) + (2 if predict_location else 0)
-        # self.predictor.fc = nn.Linear(512, output_size)
+        self.predictor.fc = nn.Identity()
         self.doa_head = nn.Linear(512,360)
         self.dis_head = nn.Linear(512,120)
         self.last_global_coords = None
@@ -41,7 +41,7 @@ class AudioGoalPredictor(nn.Module):
         # predicted_doa = torch.sigmoid(predicted_doa)
         predicted_dis = self.dis_head(audio_feature)
         predicted_dis = torch.sigmoid(predicted_dis)
-        return predicted_doa,predicted_doa
+        return predicted_doa,predicted_dis
         # return self.predictor(audio_observations)
 
     def update(self, observations, envs, predict_location):
