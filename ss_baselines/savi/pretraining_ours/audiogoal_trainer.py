@@ -35,7 +35,7 @@ class AudioGoalPredictorTrainer:
                                                       predict_location=predict_location).to(device=self.device)
         self.predict_label = predict_label
         self.predict_location = predict_location
-        summary(self.audiogoal_predictor.predictor, (2, 65, 26), device='cuda')
+        summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda')
 
     def run(self, splits, writer=None):
         meta_dir = self.config.TASK_CONFIG.SIMULATOR.AUDIO.METADATA_DIR
@@ -55,7 +55,7 @@ class AudioGoalPredictorTrainer:
                 scenes=scenes,
                 split=split,
                 use_polar_coordinates=True,
-                use_cache=True
+                use_cache=False
             )
             #TODO YYZ
             dataloaders[split] = DataLoader(dataset=datasets[split],

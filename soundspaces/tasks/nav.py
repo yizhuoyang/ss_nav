@@ -276,7 +276,7 @@ class EgoMap(Sensor):
         # Pre-compute a grid of locations for depth projection
         W = self._sim.config.DEPTH_SENSOR.WIDTH
         H = self._sim.config.DEPTH_SENSOR.HEIGHT
-        W,H = 128,128
+        # W,H = 128,128
         self.proj_xs, self.proj_ys = np.meshgrid(
                                           np.linspace(-1, 1, W),
                                           np.linspace(1, -1, H)

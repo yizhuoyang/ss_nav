@@ -84,9 +84,9 @@ Check out the [jupyter notebook](examples/soundspaces2_quick_tutorial.ipynb) for
 
 ## Contributing
 See the [CONTRIBUTING](CONTRIBUTING.md) file for how to help out.
-
+<!-- 
 ## License
-SoundSpaces is CC-BY-4.0 licensed, as found in the [LICENSE](LICENSE) file.
+SoundSpaces is CC-BY-4.0 licensed, as found in the [LICENSE](LICENSE) file. -->
 
 The trained models and the task datasets are considered data derived from the correspondent scene datasets.
 - Matterport3D based task datasets and trained models are distributed with [Matterport3D Terms of Use](http://kaldir.vc.in.tum.de/matterport/MP_TOS.pdf) and under [CC BY-NC-SA 3.0 US license](https://creativecommons.org/licenses/by-nc-sa/3.0/us/).

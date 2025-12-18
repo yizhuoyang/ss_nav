@@ -185,8 +185,8 @@ class AudioGoalDataset(Dataset):
             audiogoal = self.compute_audiogoal(rir_file, sound_file)
             spectrogram = to_tensor(self.compute_spectrogram(audiogoal))
             goal = self.goals[item]
-            theta = to_tensor(make_doa_gaussian(goal[0],goal[1]))
-            distance = to_tensor(make_r_gaussian_1d(goal[1]))
+            theta = to_tensor(make_doa_gaussian(goal[1],goal[2]))
+            distance = to_tensor(make_r_gaussian_1d(goal[2]))
             inputs_outputs = ([spectrogram], [theta,distance])
             if self.use_cache:
                 self.data[item] = inputs_outputs
@@ -235,7 +235,7 @@ class AudioGoalDataset(Dataset):
             hop_length = 160
             win_length = 400
             stft = np.abs(librosa.stft(signal, n_fft=n_fft, hop_length=hop_length, win_length=win_length))
-            stft = block_reduce(stft, block_size=(4, 4), func=np.mean)
+            # stft = block_reduce(stft, block_size=(4, 4), func=np.mean)
             return stft
 
         channel1_magnitude = np.log1p(compute_stft(audiogoal[0]))
