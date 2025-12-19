@@ -473,8 +473,6 @@ class PPOTrainer(BaseRLTrainer):
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
-
-
         ############### Load SSL model and checkpoint ##################
         CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly_none/last_model.pth'
         model = SSLNet(use_compress=False).to(self.device)
@@ -517,7 +515,9 @@ class PPOTrainer(BaseRLTrainer):
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
-
+        # self.envs = construct_envs(
+        #     config, get_env_class(config.ENV_NAME)
+        # )
         #——————————————————————————Code for skip———————————————————————————————————#
         # SKIP_EPISODES = 100
         #
@@ -657,13 +657,13 @@ class PPOTrainer(BaseRLTrainer):
             
             # _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
             # print("!!!!!!!!!!!!!!")
-            print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
+            # print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
 
             data = {
-                "action": np.array([max_x_world,max_z_world]),
+                "action": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }
-            print(source_loc,current_position,angle)
+            print(source_loc,current_position)
             actions = [data]
             outputs = self.envs.step(actions)
             ######### Suppose the location of the sound source is known ################

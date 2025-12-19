@@ -424,12 +424,12 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly_none/last_model.pth'
-        model = SSLNet(use_compress=False).to(self.device)
-        ckpt = torch.load(CKPT_PATH, map_location=self.device)
-        model.load_state_dict(ckpt)
-        print(f"Loaded checkpoint from {CKPT_PATH}")
-        model.eval()
+        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly_none/last_model.pth'
+        # model = SSLNet(use_compress=False).to(self.device)
+        # ckpt = torch.load(CKPT_PATH, map_location=self.device)
+        # model.load_state_dict(ckpt)
+        # print(f"Loaded checkpoint from {CKPT_PATH}")
+        # model.eval()
         ############### Load SSL model and checkpoint ##################
 
         if self.config.EVAL.USE_CKPT_CONFIG:
@@ -452,7 +452,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.FOLLOW_SHORTEST_PATH = True
         config.freeze()
@@ -573,19 +573,19 @@ class PPOTrainer(BaseRLTrainer):
                 current_position = state.position
                 current_rotation = state.rotation
                 source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-                print(current_rotation)
-                if pose_all[-1]==0:
-                    refiner.reset() 
-                spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-                depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-                predicted_heatmap = model(spectrogram,depth)
-                pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
-                pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
+                # print(current_rotation)
+                # if pose_all[-1]==0:
+                #     refiner.reset() 
+                # spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
+                # depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
+                # predicted_heatmap = model(spectrogram,depth)
+                # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
+                # pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
 
-                agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
-                _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
-                print("!!!!!!!!!!!!!!")
-                print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
+                # agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
+                # _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
+                # print("!!!!!!!!!!!!!!")
+                # print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
                 oracle_actions = sim.compute_oracle_actions_with_goal(sim._position_to_index(sim.get_agent_state().position),sim._position_to_index(source_loc))
                 actions = oracle_actions
                 ################# Our network define here ################# 

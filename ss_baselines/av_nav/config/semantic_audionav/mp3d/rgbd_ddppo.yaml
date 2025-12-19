@@ -1,5 +1,5 @@
 BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/av_nav/mp3d/semantic_audiogoal.yaml"
-TRAINER_NAME: "ddppo"
+# TRAINER_NAME: "ppo"
 NUM_PROCESSES: 10
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR"]
 NUM_UPDATES: 40000

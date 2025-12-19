@@ -167,13 +167,13 @@ class AudioNavBaselineNet(Net):
 
         if 'rgb' in observation_space.spaces and encode_rgb:
             rgb_shape = observation_space.spaces['rgb'].shape
-            summary(self.visual_encoder.cnn, (rgb_shape[2], rgb_shape[0], rgb_shape[1]), device='cpu')
+            # summary(self.visual_encoder.cnn, (rgb_shape[2], rgb_shape[0], rgb_shape[1]), device='cpu')
         if 'depth' in observation_space.spaces and encode_depth:
             depth_shape = observation_space.spaces['depth'].shape
-            summary(self.visual_encoder.cnn, (depth_shape[2], depth_shape[0], depth_shape[1]), device='cpu')
+            # summary(self.visual_encoder.cnn, (depth_shape[2], depth_shape[0], depth_shape[1]), device='cpu')
         if 'spectrogram' in observation_space.spaces:
             audio_shape = observation_space.spaces['spectrogram'].shape
-            summary(self.audio_encoder.cnn, (audio_shape[2], audio_shape[0], audio_shape[1]), device='cpu')
+            # summary(self.audio_encoder.cnn, (audio_shape[2], audio_shape[0], audio_shape[1]), device='cpu')
         if self._gm:
             gm_shape = observation_space.spaces['gm'].shape
             summary(self.gm_encoder.cnn, (gm_shape[2], gm_shape[0], gm_shape[1]), device='cpu')

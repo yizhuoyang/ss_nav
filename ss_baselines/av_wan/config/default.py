@@ -25,6 +25,7 @@ CONFIG_FILE_SEPARATOR = ","
 _C = CN()
 _C.SEED = 0
 _C.BASE_TASK_CONFIG_PATH = "configs/tasks/pointnav.yaml"
+# _C.BASE_TASK_CONFIG_PATH = "configs/tasks/pointgoal.yaml"
 _C.TASK_CONFIG = CN()  # task_config will be stored as a config node
 _C.CMD_TRAILING_OPTS = []  # store command line options as list of strings
 _C.TRAINER_NAME = "AVWanTrainer"
@@ -52,7 +53,7 @@ _C.ENCODE_DEPTH = True
 _C.DEBUG = False
 _C.USE_LAST_CKPT = False
 _C.PREDICTION_INTERVAL = 2
-_C.DATASET_FILTER = []
+# _C.DATASET_FILTER = []
 _C.VISUALIZE_FAILURE_ONLY = False
 _C.MASKING = True
 _C.DISPLAY_RESOLUTION = 128
@@ -135,6 +136,7 @@ _TC.SIMULATOR.AUDIO.POINTS_FILE = 'points.txt'
 _TC.SIMULATOR.AUDIO.GRAPH_FILE = 'graph.pkl'
 _TC.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND = False
 _TC.SIMULATOR.AUDIO.EVERLASTING = True
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SOUND_DIR = 'data/sounds/1s_all_distractor'
 # -----------------------------------------------------------------------------
 # DistanceToGoal Measure
 # -----------------------------------------------------------------------------
@@ -146,6 +148,8 @@ _TC.TASK.DISTANCE_TO_GOAL.DISTANCE_TO = "POINT"
 # -----------------------------------------------------------------------------
 _TC.TASK.NORMALIZED_DISTANCE_TO_GOAL = CN()
 _TC.TASK.NORMALIZED_DISTANCE_TO_GOAL.TYPE = "NormalizedDistanceToGoal"
+_TC.TASK.SUCCESS_WHEN_SILENT = CN()
+_TC.TASK.SUCCESS_WHEN_SILENT.TYPE = "SWS"
 # -----------------------------------------------------------------------------
 # Dataset extension
 # -----------------------------------------------------------------------------

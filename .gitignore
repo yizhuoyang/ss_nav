@@ -14,3 +14,4 @@ my_script
 /video_gt
 /video_sem
 /cache
+/video_*

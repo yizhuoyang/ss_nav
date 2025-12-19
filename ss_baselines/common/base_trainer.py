@@ -5,14 +5,11 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
 import os
 import time
 from typing import ClassVar, Dict, List
 import glob
-
 import torch
-
 from habitat import Config, logger
 from ss_baselines.common.tensorboard_utils import TensorboardWriter
 from ss_baselines.common.utils import poll_checkpoint_folder

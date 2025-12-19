@@ -136,6 +136,9 @@ _TC.SIMULATOR.AUDIO.GRAPH_FILE = 'graph.pkl'
 _TC.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND = False
 _TC.SIMULATOR.AUDIO.EVERLASTING = True
 _TC.SIMULATOR.AUDIO.CROSSFADE = False
+# TODO YYZ
+_TC.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND = False
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SOUND_DIR = 'data/sounds/1s_all_distractor'
 # -----------------------------------------------------------------------------
 # DistanceToGoal Measure
 # -----------------------------------------------------------------------------
