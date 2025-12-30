@@ -677,7 +677,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(SEED)
         np.random.seed(SEED)
         torch.manual_seed(SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_512'
+        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_128'
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 
@@ -810,13 +810,13 @@ class PPOTrainer(BaseRLTrainer):
             self.belief_predictor.eval()
         
 
-        t = tqdm(total=40000)
+        t = tqdm(total=70000)
 
         TURN_STEPS_FULL = 4          # 90° * 4 = 360°
         spin_remaining = 0           # 0 表示不在转圈阶段
     
         while (
-            len(stats_episodes) < 40000
+            len(stats_episodes) < 70000
             and self.envs.num_envs > 0
         ):
 
@@ -825,30 +825,9 @@ class PPOTrainer(BaseRLTrainer):
             current_episodes = self.envs.current_episodes()
             oracle_actions = sim.compute_oracle_actions()
 
-            # 取出第一个 env 的 oracle action（你现在基本是单 env）
-            a0 = oracle_actions[0] if isinstance(oracle_actions, (list, tuple)) else oracle_actions
-
-            # --- 根据 spin_remaining 决定动作，并决定本步是否保存 ---
-            if spin_remaining > 0:
-                actions = [HabitatSimActions.TURN_LEFT for _ in range(self.envs.num_envs)]
-                save_this_step = (spin_remaining > 1)
-
-                spin_remaining -= 1
-
-            else:
-                actions = oracle_actions
-                save_this_step = True  # oracle 步保存
-
-                # ✅ 只有当 oracle 这一步是 MOVE_FORWARD 才开始转圈
-                if a0 == HabitatSimActions.MOVE_FORWARD:
-                    spin_remaining = TURN_STEPS_FULL
-                else:
-                    spin_remaining = 0
-
-            outputs = self.envs.step(actions)
+            outputs = self.envs.step(oracle_actions)
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
 
-            # ===== 保存 =====
             state = sim.get_agent_state()
             q = state.rotation
             q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
@@ -856,7 +835,7 @@ class PPOTrainer(BaseRLTrainer):
 
             step_idx = int(pose_all[3])
 
-            if step_idx != 0 and save_this_step and observations[0]['spectrogram'].sum() != 0:
+            if step_idx != 0:
                 current_scenc = sim._current_scene
                 scene_dir = os.path.dirname(current_scenc)
                 scene_name = os.path.basename(scene_dir)

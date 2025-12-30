@@ -180,7 +180,7 @@ class Planner:
         cur_node = self._node_id(xg, yg)
         tgt_node = self._node_id(ggx, ggy)
 
-
+        print(xg,yg,gx,gy)
         # if cur_node in self._graph and tgt_node in self._graph:
         #     print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
 

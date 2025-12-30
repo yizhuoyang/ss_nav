@@ -161,14 +161,15 @@ _TC.TASK.EGOMAP_SENSOR = SIMULATOR_SENSOR.clone()
 _TC.TASK.EGOMAP_SENSOR.TYPE = "EgoMap"
 _TC.TASK.EGOMAP_SENSOR.MAP_SIZE = 31
 _TC.TASK.EGOMAP_SENSOR.MAP_RESOLUTION = 0.1
-_TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (0.5, 2.0)
+_TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (0.5,1.0)
+# _TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (5, 5.5)
 # -----------------------------------------------------------------------------
 # Global map placeholder
 # -----------------------------------------------------------------------------
 _TC.TASK.GEOMETRIC_MAP = SIMULATOR_SENSOR.clone()
 _TC.TASK.GEOMETRIC_MAP.TYPE = "GeometricMap"
-_TC.TASK.GEOMETRIC_MAP.MAP_SIZE = 200
-_TC.TASK.GEOMETRIC_MAP.INTERNAL_MAP_SIZE = 500
+_TC.TASK.GEOMETRIC_MAP.MAP_SIZE = 400
+_TC.TASK.GEOMETRIC_MAP.INTERNAL_MAP_SIZE = 600
 _TC.TASK.GEOMETRIC_MAP.MAP_RESOLUTION = 0.1
 _TC.TASK.GEOMETRIC_MAP.NUM_CHANNEL = 2
 # -----------------------------------------------------------------------------
@@ -186,7 +187,7 @@ _TC.TASK.ACOUSTIC_MAP.ENCODING = "average_intensity"
 _TC.TASK.ACTION_MAP = SIMULATOR_SENSOR.clone()
 _TC.TASK.ACTION_MAP.TYPE = "ActionMap"
 _TC.TASK.ACTION_MAP.MAP_SIZE = 9
-_TC.TASK.ACTION_MAP.MAP_RESOLUTION = 0.5
+_TC.TASK.ACTION_MAP.MAP_RESOLUTION = 1.0
 _TC.TASK.ACTION_MAP.NUM_CHANNEL = 1
 # -----------------------------------------------------------------------------
 # Collision Sensor in habitat-audio

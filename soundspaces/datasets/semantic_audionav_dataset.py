@@ -190,7 +190,7 @@ class SemanticAudioNavDataset(Dataset):
         # for k, v in deserialized["goals_by_category"].items():
         #     self.goals_by_category[k] = [self.__deserialize_goal(g) for g in v]
 
-        for i, episode in enumerate(deserialized["episodes"][:500]):
+        for i, episode in enumerate(deserialized["episodes"][:2000]):
             episode = SemanticAudioGoalNavEpisode(**episode)
             # a temporal workaround to set scene_dataset_config attribute
             episode.scene_dataset_config = self._config.SCENES_DIR.split('/')[-1]

@@ -30,9 +30,9 @@ class AudioGoalPredictorTrainer:
         self.num_worker = 8
         self.lr = 1e-3
         self.weight_decay = None
-        self.num_epoch = 50
+        self.num_epoch = 100
         self.audiogoal_predictor = AudioGoalPredictor(predict_label=predict_label,
-                                                      predict_location=predict_location).to(device=self.device)
+                                                      predict_location=predict_location).to(device=self.device)                              
         self.predict_label = predict_label
         self.predict_location = predict_location
         summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda')
@@ -85,7 +85,7 @@ class AudioGoalPredictorTrainer:
         )
         # training params
         since = time.time()
-        best_acc = 10000
+        best_acc = 0
         best_model_wts = None
         num_epoch = self.num_epoch if 'train' in splits else 1
         for epoch in range(num_epoch):
@@ -200,7 +200,7 @@ class AudioGoalPredictorTrainer:
                 # else:
                 #     target_acc = epoch_classifier_acc
 
-                if split == 'val' and epoch_total_loss < best_acc:
+                if split == 'val' and epoch_total_loss > best_acc:
                     best_acc = epoch_total_loss
                     best_model_wts = copy.deepcopy(model.state_dict())
                     self.save_checkpoint(f"ckpt.{epoch}.pth")
@@ -272,6 +272,10 @@ def main():
 
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
+        # load checkpoints
+        ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final/best_val.pth'))
+        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'])
+        # load checkpoints
         audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:
         ckpt = torch.load(os.path.join(args.model_dir, 'val_best.pth'))
