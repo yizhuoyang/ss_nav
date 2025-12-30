@@ -55,6 +55,7 @@ class MapNavEnv(habitat.RLEnv):
 
     def step(self, *args, **kwargs):
         world_goal = kwargs["action"]
+        target_goal = kwargs["target_goal"]
         # num_step = kwargs["step"]
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
         _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
@@ -64,8 +65,7 @@ class MapNavEnv(habitat.RLEnv):
         # print(goal,self.planner.mapper._world_x0,self.planner.mapper._world_z0,)
         # stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
         agent_pose = kwargs["agent_pos"]
-        stop = np.linalg.norm(world_goal - agent_pose) <=0.5
-
+        stop = np.linalg.norm(target_goal - agent_pose) <=0.5
         observation = self._previous_observation
         cumulative_reward = 0
         done = False
@@ -74,7 +74,7 @@ class MapNavEnv(habitat.RLEnv):
         if len(self._config.VIDEO_OPTION) > 0:
             rgb_frames = list()
             audios = list()
-
+        print("prediction_interval:",self._config.PREDICTION_INTERVAL)
         for step_count in range(self._config.PREDICTION_INTERVAL):
             if step_count != 0 and not self.planner.check_navigability(goal):
                 cant_reach_waypoint = True

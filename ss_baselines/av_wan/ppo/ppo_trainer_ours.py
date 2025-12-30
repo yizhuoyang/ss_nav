@@ -17,7 +17,8 @@ import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
-from ssl_net_infer import SSLNet
+from prob_update_doa import StreamingSourceMapFusion
+from ssl_net_infer import SSLNet,SSLNet_DOA
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
@@ -474,8 +475,19 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/weights/audionly_none/last_model.pth'
-        # model = SSLNet(use_compress=False).to(self.device)
+        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_tune/ckpt.41.pth'
+        model = SSLNet_DOA(use_compress=False).to(self.device)
+        if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
+            ckpt = torch.load(CKPT_PATH, map_location="cpu")
+            if "audiogoal_predictor" in ckpt:
+                model.load_state_dict(ckpt["audiogoal_predictor"], strict=False)
+                print(f"[INFO] loaded ckpt: {CKPT_PATH}")
+            else:
+                model.load_state_dict(ckpt, strict=False)
+                print(f"[INFO] loaded ckpt (raw state_dict): {CKPT_PATH}")
+        else:
+            print("[WARN] ckpt not loaded (path is None or not exists).")
+        model.eval()
         # ckpt = torch.load(CKPT_PATH, map_location=self.device)
         # model.load_state_dict(ckpt)
         # print(f"Loaded checkpoint from {CKPT_PATH}")
@@ -616,13 +628,24 @@ class PPOTrainer(BaseRLTrainer):
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
 
-        refiner = GlobalSoundMapRefiner(
-            H_l=H_l,
-            W_l=W_l,
-            meters_per_pixel=meters_per_pixel,
-            decay=0.8,
-            prior_prob=0.01,
+        # refiner = GlobalSoundMapRefiner(
+        #     H_l=H_l,
+        #     W_l=W_l,
+        #     meters_per_pixel=meters_per_pixel,
+        #     decay=0.8,
+        #     prior_prob=0.01,
+        # )
+        refiner = StreamingSourceMapFusion(
+            map_size_m=60.0,
+            res=1.0,
+            sigma_Q_cells=0.0,
+            beta_r=0.9,
+            r_max=30.0,
+            intensity_zero_eps=0.0,
+            out_dir="debug_plan_new/fusion_stream_debug",
+            save_every=1,
         )
+
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
@@ -638,47 +661,46 @@ class PPOTrainer(BaseRLTrainer):
                 angle          = state.rotation
                 angle             = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
                 self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
-                refiner.reset()
+                refiner.reset(new_center_pose=current_position)
+                print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
 
-            # spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            # depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-            # predicted_heatmap = model(spectrogram,depth)
+            spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
+            depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
+            pred_doa,pred_r = model(spectrogram,depth)
+            pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
+            pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
             # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
             # pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
 
-            # agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
-            
+            agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
+            audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
+            print(audio_intensity)
             # max_x_world, max_z_world = localmap_argmax_world(pred_prob, agent_x, agent_z, heading, meters_per_pixel)
-            
+            out = refiner.update_frame(
+                pred_theta=pred_doa,
+                pred_r=pred_r,
+                pose=current_position,
+                heading=heading,
+                audio_intensity=audio_intensity,
+                save_vis=True,
+            )
             # _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
             # print("!!!!!!!!!!!!!!")
             # print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
-
+            max_x_world,max_z_world = out['map_argmax_world']
             data = {
-                "action": np.array([source_loc[0],source_loc[-1]]),
+                "action": np.array([max_x_world,max_z_world]),
+                "target_goal": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }
-            print(source_loc,current_position)
+            print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
             actions = [data]
             outputs = self.envs.step(actions)
-            ######### Suppose the location of the sound source is known ################
-            # with torch.no_grad():
-            #     _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
-            #         batch,
-            #         test_recurrent_hidden_states,
-            #         prev_actions,
-            #         not_done_masks,
-            #         deterministic=True
-            #     )
-            #
-            #     prev_actions.copy_(actions)
-            #
-            # outputs = self.envs.step([{"action": a[0].item()} for a in actions])
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
             if config.DISPLAY_RESOLUTION != model_resolution:

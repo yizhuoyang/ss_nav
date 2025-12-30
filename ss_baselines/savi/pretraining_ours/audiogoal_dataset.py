@@ -19,6 +19,28 @@ from soundspaces.mp3d_utils import CATEGORY_INDEX_MAPPING
 from soundspaces.mp3d_utils import SCENE_SPLITS
 from soundspaces.utils import load_metadata
 
+class _DummyObject:
+    def __init__(self, *a, **k): pass
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+
+class _SafeUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        try:
+            __import__(module)
+            return getattr(__import__(module, fromlist=[name]), name)
+        except Exception:
+            return _DummyObject
+
+
+def _load_pkl_any(path):
+    with open(path, "rb") as f:
+        try:
+            return pickle.load(f)
+        except ModuleNotFoundError:
+            f.seek(0)
+            return _SafeUnpickler(f).load()
 
 class AudioGoalDataset(Dataset):
     def __init__(
@@ -32,6 +54,10 @@ class AudioGoalDataset(Dataset):
         cache_dir="/home/Disk/yyz/sound-spaces/cache",
         cache_name=None,
         rebuild_cache=False,
+
+        depth_pkl_dir="data/scene_observations/mp3d",
+        depth_key="depth",   # 你pkl里 value 的 key: "depth"
+        return_depth=True,   # 是否在 __getitem__ 返回 depth
     ):
         self.use_cache = use_cache
         self.files = []
@@ -39,9 +65,15 @@ class AudioGoalDataset(Dataset):
 
         self.binaural_rir_dir = 'data/binaural_rirs/mp3d'
         self.source_sound_dir = f'data/sounds/semantic_splits/{split}'
+        self.observation_dir  = 'data/scene_observations/mp3d'
         self.source_sound_dict = {}
         self.rir_sampling_rate = 16000
         self.num_samples_per   = 25000
+
+        self.depth_pkl_dir = depth_pkl_dir
+        self.depth_key = depth_key
+        self.return_depth = return_depth
+        self._scene_pkl_cache = {}  
 
         # ===== 1) 磁盘 cache 路径 =====
         os.makedirs(cache_dir, exist_ok=True)
@@ -154,6 +186,48 @@ class AudioGoalDataset(Dataset):
             self.source_sound_dict[sound_file] = audio_data
 
     @staticmethod
+    def _parse_rir_path(rir_file: str):
+        # .../mp3d/{scene}/{angle}/{r}_{s}.wav
+        scene = os.path.basename(os.path.dirname(os.path.dirname(rir_file)))
+        angle = int(os.path.basename(os.path.dirname(rir_file)))
+        stem = os.path.splitext(os.path.basename(rir_file))[0]  # "r_s"
+        r_str, s_str = stem.split("_")
+        r = int(r_str)
+        s = int(s_str)
+        return scene, angle, r, s
+    
+    def _get_depth_from_pkl(self, scene: str, r: int, angle: int):
+        if scene not in self._scene_pkl_cache:
+            # 允许两种命名：{scene}.pkl 或直接 scene 目录下某个固定名（你可按需改）
+            cand = [
+                os.path.join(self.depth_pkl_dir, f"{scene}.pkl"),
+                os.path.join(self.depth_pkl_dir, scene, "observations.pkl"),
+            ]
+            pkl_path = None
+            for c in cand:
+                if os.path.exists(c):
+                    pkl_path = c
+                    break
+            if pkl_path is None:
+                raise FileNotFoundError(f"Cannot find pkl for scene={scene} in {self.depth_pkl_dir}")
+
+            self._scene_pkl_cache[scene] = _load_pkl_any(pkl_path)
+
+        scene_dict = self._scene_pkl_cache[scene]     # dict[(node,angle)] -> obj
+        key = (r, angle)
+        if key not in scene_dict:
+            return None
+
+        entry = scene_dict[key]
+        # entry 可能是对象（entry.depth）也可能是 dict（entry["depth"]）
+        if isinstance(entry, dict):
+            depth = entry[self.depth_key]
+        else:
+            depth = getattr(entry, self.depth_key)
+        return depth
+
+
+    @staticmethod
     def _compute_goal_xy(delta_x, delta_y, angle, use_polar_coordinates):
         if angle == 0:
             x = delta_x
@@ -187,7 +261,26 @@ class AudioGoalDataset(Dataset):
             goal = self.goals[item]
             theta = to_tensor(make_doa_gaussian(goal[1],goal[2]))
             distance = to_tensor(make_r_gaussian_1d(goal[2]))
-            inputs_outputs = ([spectrogram], [theta,distance])
+
+            if self.return_depth:
+                scene, angle, r, s = self._parse_rir_path(rir_file)
+                depth_np = self._get_depth_from_pkl(scene, r, angle)  # (H,W,1) float32
+                if depth_np is None:
+                    # 缺失就给0，避免训练崩
+                    depth = torch.zeros((1, 128, 128), dtype=torch.float32)
+                else:
+                    depth_np = np.asarray(depth_np)
+                    # (H,W,1) -> (1,H,W)
+                    if depth_np.ndim == 3 and depth_np.shape[-1] == 1:
+                        depth_np = depth_np.transpose(2, 0, 1)
+                    elif depth_np.ndim == 2:
+                        depth_np = depth_np[None, ...]
+                    depth = torch.from_numpy(depth_np).float()
+
+                inputs_outputs = ([spectrogram, depth], [theta, distance])
+            else:
+                inputs_outputs = ([spectrogram], [theta, distance])
+
             if self.use_cache:
                 self.data[item] = inputs_outputs
         else:
@@ -313,7 +406,8 @@ if __name__ == "__main__":
     )
 
     print(f"[INFO] dataset split={SPLIT}, len={len(dataset)}")
-
+    x = dataset[0]
+    print(x[0][0].shape,x[0][1].shape)  # spectrogram
     # -----------------------
     # 3) 构建模型 + 可选加载权重
     # # -----------------------

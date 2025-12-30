@@ -10,7 +10,7 @@ my_script
 /weights
 *.mp3
 /video
-/debug_plan
+/debug*
 /video_gt
 /video_sem
 /cache

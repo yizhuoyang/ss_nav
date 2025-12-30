@@ -68,7 +68,7 @@ class Planner:
         self._last_collided = False
         self._block_forward_steps = 0
 
-        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan"
+        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan_new"
         os.makedirs(self._debug_dir, exist_ok=True)
         self._debug_step = 0
         self._debug_every = 1  # 每步都画；想降低开销可设 5/10

@@ -330,8 +330,8 @@ class Mapper(nn.Module):
         
         mx = int(round(self._internal_gm_size / 2 + mx_m / self._gm_res))
         my = int(round(self._internal_gm_size / 2 + my_m / self._gm_res))
-
-        print("debug",wx,wz,self._world_x0,self._world_z0,dx,dz,mx,my)
+        # print(self._internal_gm_size,self._gm_res)
+        # print("debug",wx,wz,self._world_x0,self._world_z0,dx,dz,mx,my)
 
         return mx, my
 

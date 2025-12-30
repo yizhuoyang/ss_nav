@@ -112,7 +112,12 @@ class AudioGoalPredictorTrainer:
                     inputs, gts = data
 
                     # remove alpha channel
-                    inputs = [x.to(device=self.device, dtype=torch.float) for x in inputs]
+                    # inputs = [x.to(device=self.device, dtype=torch.float) for x in inputs]
+
+                    spectrogram,depth = inputs
+                    spectrogram = spectrogram.to(device=self.device, dtype=torch.float)
+                    depth = depth.to(device=self.device, dtype=torch.float)
+                    inputs = [spectrogram,depth]
                     # gts = gts.to(device=self.device, dtype=torch.float)
                     theta_gt, dist_gt = gts
                     theta_gt = theta_gt.to(device=self.device, dtype=torch.float)
@@ -120,7 +125,7 @@ class AudioGoalPredictorTrainer:
                     # zero the parameter gradients
                     optimizer.zero_grad()
                     # forward
-                    predicts_doa,predicts_dis = model({input_type: x for input_type, x in zip(['spectrogram'], inputs)})
+                    predicts_doa,predicts_dis = model({input_type: x for input_type, x in zip(['spectrogram','depth'], inputs)})
 
                     if self.predict_label and self.predict_location:
                         classifier_loss = classifier_criterion(predicts[:, :-2], gts[:, 0].long())
@@ -273,8 +278,8 @@ def main():
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
         # load checkpoints
-        ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final/best_val.pth'))
-        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'])
+        ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final_tune/best_val.pth'))
+        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
         # load checkpoints
         audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:
