@@ -18,7 +18,8 @@ from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPred
 from ss_baselines.savi.pretraining_ours.audiogoal_dataset import AudioGoalDataset
 from ss_baselines.savi.config.default import get_config
 from soundspaces.mp3d_utils import SCENE_SPLITS
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 class AudioGoalPredictorTrainer:
     def __init__(self, config, model_dir, predict_label, predict_location):
@@ -205,8 +206,8 @@ class AudioGoalPredictorTrainer:
                 # else:
                 #     target_acc = epoch_classifier_acc
 
-                if split == 'val' and epoch_total_loss > best_acc:
-                    best_acc = epoch_total_loss
+                if split == 'val' and epoch_regressor_acc > best_acc:
+                    best_acc = epoch_regressor_acc
                     best_model_wts = copy.deepcopy(model.state_dict())
                     self.save_checkpoint(f"ckpt.{epoch}.pth")
 
@@ -278,8 +279,8 @@ def main():
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
         # load checkpoints
-        ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final_tune/best_val.pth'))
-        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
+        # ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final_tune/best_val.pth'))
+        # audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
         # load checkpoints
         audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:

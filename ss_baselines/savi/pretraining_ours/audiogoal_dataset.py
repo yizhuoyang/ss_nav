@@ -55,8 +55,7 @@ class AudioGoalDataset(Dataset):
         cache_name=None,
         rebuild_cache=False,
 
-        depth_pkl_dir="data/scene_observations/mp3d",
-        depth_key="depth",   # 你pkl里 value 的 key: "depth"
+        depth_dir="/home/Disk/sound-space/depth_npy/mp3d",
         return_depth=True,   # 是否在 __getitem__ 返回 depth
     ):
         self.use_cache = use_cache
@@ -70,10 +69,8 @@ class AudioGoalDataset(Dataset):
         self.rir_sampling_rate = 16000
         self.num_samples_per   = 25000
 
-        self.depth_pkl_dir = depth_pkl_dir
-        self.depth_key = depth_key
+        self.depth_dir = depth_dir
         self.return_depth = return_depth
-        self._scene_pkl_cache = {}  
 
         # ===== 1) 磁盘 cache 路径 =====
         os.makedirs(cache_dir, exist_ok=True)
@@ -225,7 +222,13 @@ class AudioGoalDataset(Dataset):
         else:
             depth = getattr(entry, self.depth_key)
         return depth
-
+    
+    def _get_depth_from_npy(self, scene: str, r: int, angle: int):
+        dpath = os.path.join(self.depth_dir, scene, f"{r}_{angle}.npy")
+        if not os.path.exists(dpath):
+            return None
+        depth = np.load(dpath, mmap_mode="r")  # (1,128,128) float16
+        return depth
 
     @staticmethod
     def _compute_goal_xy(delta_x, delta_y, angle, use_polar_coordinates):
@@ -257,25 +260,29 @@ class AudioGoalDataset(Dataset):
         if (self.use_cache and self.data[item] is None) or (not self.use_cache):
             rir_file, sound_file = self.files[item]
             audiogoal = self.compute_audiogoal(rir_file, sound_file)
-            spectrogram = to_tensor(self.compute_spectrogram(audiogoal))
+            # spectrogram = to_tensor(self.compute_spectrogram(audiogoal))
+            spectrogram = to_tensor(self.compute_stft_phase_features(audiogoal))  # (F,T,2) float32
             goal = self.goals[item]
             theta = to_tensor(make_doa_gaussian(goal[1],goal[2]))
             distance = to_tensor(make_r_gaussian_1d(goal[2]))
 
             if self.return_depth:
                 scene, angle, r, s = self._parse_rir_path(rir_file)
-                depth_np = self._get_depth_from_pkl(scene, r, angle)  # (H,W,1) float32
-                if depth_np is None:
-                    # 缺失就给0，避免训练崩
-                    depth = torch.zeros((1, 128, 128), dtype=torch.float32)
-                else:
-                    depth_np = np.asarray(depth_np)
-                    # (H,W,1) -> (1,H,W)
-                    if depth_np.ndim == 3 and depth_np.shape[-1] == 1:
-                        depth_np = depth_np.transpose(2, 0, 1)
-                    elif depth_np.ndim == 2:
-                        depth_np = depth_np[None, ...]
-                    depth = torch.from_numpy(depth_np).float()
+                # depth_np = self._get_depth_from_pkl(scene, r, angle)  # (H,W,1) float32
+                depth_np = self._get_depth_from_npy(scene, r, angle)
+                depth = torch.from_numpy(np.array(depth_np, copy=False)).float()
+                # depth = torch.from_numpy(depth_np).to(torch.float32)  # 不再 warning
+                # if depth_np is None:
+                #     # 缺失就给0，避免训练崩
+                #     depth = torch.zeros((1, 128, 128), dtype=torch.float32)
+                # else:
+                #     depth_np = np.asarray(depth_np)
+                #     # (H,W,1) -> (1,H,W)
+                #     if depth_np.ndim == 3 and depth_np.shape[-1] == 1:
+                #         depth_np = depth_np.transpose(2, 0, 1)
+                #     elif depth_np.ndim == 2:
+                #         depth_np = depth_np[None, ...]
+                #     depth = torch.from_numpy(depth_np).float()
 
                 inputs_outputs = ([spectrogram, depth], [theta, distance])
             else:
@@ -335,6 +342,63 @@ class AudioGoalDataset(Dataset):
         channel2_magnitude = np.log1p(compute_stft(audiogoal[1]))
         spectrogram = np.stack([channel1_magnitude, channel2_magnitude], axis=-1)
         return spectrogram
+
+    @staticmethod
+    def compute_stft_phase_features(audiogoal, mode="ipd", eps=1e-8):
+        """
+        Args:
+            audiogoal: array-like, shape (2, N)  (stereo / 2-mic)
+            mode:
+                - "phase": return per-channel phase sin/cos  -> (F, T, 4) = [cos(phi1), sin(phi1), cos(phi2), sin(phi2)]
+                - "ipd":   return inter-channel phase diff sin/cos -> (F, T, 2) = [cos(ipd), sin(ipd)]
+                - "both":  return both of above -> (F, T, 6)
+                - "gcc_phat_complex": return normalized cross-spectrum real/imag (PHAT) -> (F, T, 2)
+        Returns:
+            feat: np.ndarray, float32
+        """
+        def stft_complex(signal):
+            n_fft = 512
+            hop_length = 160
+            win_length = 400
+            # complex STFT: (F, T)
+            return librosa.stft(signal, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+
+        # complex STFT for each channel
+        X1 = stft_complex(audiogoal[0])
+        X2 = stft_complex(audiogoal[1])
+
+        # phase in [-pi, pi]
+        phi1 = np.angle(X1)
+        phi2 = np.angle(X2)
+
+        # per-channel sin/cos
+        c1, s1 = np.cos(phi1), np.sin(phi1)
+        c2, s2 = np.cos(phi2), np.sin(phi2)
+
+        # IPD = phi1 - phi2, wrapped to [-pi, pi]
+        ipd = np.angle(np.exp(1j * (phi1 - phi2)))
+        cipd, sipd = np.cos(ipd), np.sin(ipd)
+
+        if mode == "phase":
+            feat = np.stack([c1, s1, c2, s2], axis=-1).astype(np.float32)  # (F,T,4)
+            return feat
+
+        if mode == "ipd":
+            feat = np.stack([cipd, sipd], axis=-1).astype(np.float32)  # (F,T,2)
+            return feat
+
+        if mode == "both":
+            feat = np.stack([c1, s1, c2, s2, cipd, sipd], axis=-1).astype(np.float32)  # (F,T,6)
+            return feat
+
+        if mode == "gcc_phat_complex":
+            # PHAT normalized cross-spectrum: X1*conj(X2) / |X1*conj(X2)|
+            C = X1 * np.conj(X2)
+            C_phat = C / (np.abs(C) + eps)
+            feat = np.stack([C_phat.real, C_phat.imag], axis=-1).astype(np.float32)  # (F,T,2)
+            return feat
+
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 def make_doa_gaussian(

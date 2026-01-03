@@ -677,7 +677,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(SEED)
         np.random.seed(SEED)
         torch.manual_seed(SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_128'
+        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_512'
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 
@@ -864,19 +864,19 @@ class PPOTrainer(BaseRLTrainer):
                 )
 
 
-            # if step_idx !=0:
-            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-            #     np.savez_compressed(
-            #         save_path,
-            #         pose_all=pose_all,
-            #         rgb=rgb,
-            #         depth=depth,
-            #         audio_wave=audio_wave,
-            #         source_loc=source_loc,
-            #         ego_map   = ego_map
-            #     )
-            # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            # print("The pose is", observations[0]['pose'], state.position, state.rotation)
+            if step_idx !=0:
+                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+                np.savez_compressed(
+                    save_path,
+                    pose_all=pose_all,
+                    rgb=rgb,
+                    depth=depth,
+                    audio_wave=audio_wave,
+                    source_loc=source_loc,
+                    ego_map   = ego_map
+                )
+            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
+            print("The pose is", observations[0]['pose'], state.position, state.rotation)
             ###################### Add the sensor here #####################################
 
             if self.config.DISPLAY_RESOLUTION != model_resolution:

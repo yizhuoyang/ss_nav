@@ -514,7 +514,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
         config.freeze()
@@ -679,7 +679,7 @@ class PPOTrainer(BaseRLTrainer):
 
             agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
             audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
-            print(audio_intensity)
+            # print(audio_intensity)
             # max_x_world, max_z_world = localmap_argmax_world(pred_prob, agent_x, agent_z, heading, meters_per_pixel)
             out = refiner.update_frame(
                 pred_theta=pred_doa,
@@ -689,16 +689,14 @@ class PPOTrainer(BaseRLTrainer):
                 audio_intensity=audio_intensity,
                 save_vis=True,
             )
-            # _,max_x_world, max_z_world = refiner.add_frame(pred_prob, agent_x, agent_z, heading, weight=1.0)
-            # print("!!!!!!!!!!!!!!")
-            # print(max_x_world,max_z_world,source_loc[0],source_loc[-1])
             max_x_world,max_z_world = out['map_argmax_world']
             data = {
                 "action": np.array([max_x_world,max_z_world]),
+                # "action": np.array([source_loc[0],source_loc[-1]]),
                 "target_goal": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }
-            print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
+            # print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
             actions = [data]
             outputs = self.envs.step(actions)
 
