@@ -18,7 +18,7 @@ sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
 from prob_update_doa import StreamingSourceMapFusion
-from ssl_net_infer import SSLNet,SSLNet_DOA
+from ssl_net_infer import SSLNet,SSLNet_DOA,SSLNet_depth_DOA
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
@@ -475,8 +475,8 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_tune/ckpt.41.pth'
-        model = SSLNet_DOA(use_compress=False).to(self.device)
+        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        model = SSLNet_depth_DOA(use_compress=False).to(self.device)
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
             ckpt = torch.load(CKPT_PATH, map_location="cpu")
             if "audiogoal_predictor" in ckpt:
@@ -671,7 +671,9 @@ class PPOTrainer(BaseRLTrainer):
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
             depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-            pred_doa,pred_r = model(spectrogram,depth)
+            rgb   = torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
+
+            pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
             # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)

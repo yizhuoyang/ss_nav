@@ -74,7 +74,8 @@ class SpectrogramSensor(Sensor):
         return SensorTypes.PATH
 
     def _get_observation_space(self, *args: Any, **kwargs: Any):
-        spectrogram = self.compute_spectrogram(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
+        # spectrogram = self.compute_spectrogram(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
+        spectrogram = self.compute_stft_phase_features(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
 
         return spaces.Box(
             low=np.finfo(np.float32).min,
@@ -101,9 +102,67 @@ class SpectrogramSensor(Sensor):
         return spectrogram
 
     def get_observation(self, *args: Any, observations, episode: Episode, **kwargs: Any):
-        spectrogram = self._sim.get_current_spectrogram_observation(self.compute_spectrogram)
-
+        # spectrogram = self._sim.get_current_spectrogram_observation(self.compute_spectrogram)
+        spectrogram = self._sim.get_current_spectrogram_observation(self.compute_stft_phase_features)
         return spectrogram
+
+
+    @staticmethod
+    def compute_stft_phase_features(audiogoal, mode="ipd", eps=1e-8):
+        """
+        Args:
+            audiogoal: array-like, shape (2, N)  (stereo / 2-mic)
+            mode:
+                - "phase": return per-channel phase sin/cos  -> (F, T, 4) = [cos(phi1), sin(phi1), cos(phi2), sin(phi2)]
+                - "ipd":   return inter-channel phase diff sin/cos -> (F, T, 2) = [cos(ipd), sin(ipd)]
+                - "both":  return both of above -> (F, T, 6)
+                - "gcc_phat_complex": return normalized cross-spectrum real/imag (PHAT) -> (F, T, 2)
+        Returns:
+            feat: np.ndarray, float32
+        """
+        def stft_complex(signal):
+            n_fft = 512
+            hop_length = 160
+            win_length = 400
+            # complex STFT: (F, T)
+            return librosa.stft(signal, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+
+        # complex STFT for each channel
+        X1 = stft_complex(audiogoal[0])
+        X2 = stft_complex(audiogoal[1])
+
+        # phase in [-pi, pi]
+        phi1 = np.angle(X1)
+        phi2 = np.angle(X2)
+
+        # per-channel sin/cos
+        c1, s1 = np.cos(phi1), np.sin(phi1)
+        c2, s2 = np.cos(phi2), np.sin(phi2)
+
+        # IPD = phi1 - phi2, wrapped to [-pi, pi]
+        ipd = np.angle(np.exp(1j * (phi1 - phi2)))
+        cipd, sipd = np.cos(ipd), np.sin(ipd)
+
+        if mode == "phase":
+            feat = np.stack([c1, s1, c2, s2], axis=-1).astype(np.float32)  # (F,T,4)
+            return feat
+
+        if mode == "ipd":
+            feat = np.stack([cipd, sipd], axis=-1).astype(np.float32)  # (F,T,2)
+            return feat
+
+        if mode == "both":
+            feat = np.stack([c1, s1, c2, s2, cipd, sipd], axis=-1).astype(np.float32)  # (F,T,6)
+            return feat
+
+        if mode == "gcc_phat_complex":
+            # PHAT normalized cross-spectrum: X1*conj(X2) / |X1*conj(X2)|
+            C = X1 * np.conj(X2)
+            C_phat = C / (np.abs(C) + eps)
+            feat = np.stack([C_phat.real, C_phat.imag], axis=-1).astype(np.float32)  # (F,T,2)
+            return feat
+
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 @registry.register_measure
@@ -349,8 +408,7 @@ class EgoMap(Sensor):
         else:
             depth = sim_depth
             #TODO
-            depth = depth*10
-
+        depth = depth*10
         XYZ_ego = self.convert_to_pointcloud(depth)
 
         # Adding agent's height to the point cloud
