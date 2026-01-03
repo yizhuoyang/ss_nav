@@ -677,7 +677,7 @@ class PPOTrainer(BaseRLTrainer):
         random.seed(SEED)
         np.random.seed(SEED)
         torch.manual_seed(SEED)
-        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_512'
+        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_128'
         # Map location CPU is almost always better than mapping to a CUDA device.
         ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 
@@ -851,7 +851,8 @@ class PPOTrainer(BaseRLTrainer):
                 rgb = observations[0]['rgb']
                 depth = observations[0]['depth'].squeeze(-1)
                 ego_map = observations[0]['ego_map']
-
+                print(depth.shape,rgb.shape)
+                print(depth.min(),depth.max())
                 save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
                 np.savez_compressed(
                     save_path,

@@ -471,7 +471,7 @@ if __name__ == "__main__":
 
     print(f"[INFO] dataset split={SPLIT}, len={len(dataset)}")
     x = dataset[0]
-    print(x[0][0].shape,x[0][1].shape)  # spectrogram
+    print(x[0][0].shape,x[0][1].shape,x[0][1].min(),x[0][1].max())  # spectrogram
     # -----------------------
     # 3) 构建模型 + 可选加载权重
     # # -----------------------

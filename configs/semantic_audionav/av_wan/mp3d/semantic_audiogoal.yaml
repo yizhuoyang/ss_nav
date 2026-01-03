@@ -9,7 +9,8 @@ SIMULATOR:
   DEPTH_SENSOR:
     WIDTH: 128
     HEIGHT: 128
-
+    NORMALIZE_DEPTH: False
+    
   TYPE: "SoundSpacesSim"
   ACTION_SPACE_CONFIG: "v0"
   SCENE_DATASET: "mp3d"

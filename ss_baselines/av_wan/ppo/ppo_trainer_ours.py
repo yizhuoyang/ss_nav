@@ -583,10 +583,11 @@ class PPOTrainer(BaseRLTrainer):
             self.metric_uuids.append(measure_type(sim=None, task=None, config=None)._get_uuid())
 
         observations = self.envs.reset()
-        if self.config.DISPLAY_RESOLUTION != model_resolution:
-            resize_observation(observations, model_resolution)
-        batch = batch_obs(observations, self.device)
 
+        # if self.config.DISPLAY_RESOLUTION != model_resolution:
+        #     resize_observation(observations, model_resolution)
+        batch = batch_obs(observations, self.device)
+        # print("before:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
         current_episode_reward = torch.zeros(
             self.envs.num_envs, 1, device=self.device
         )
@@ -655,27 +656,29 @@ class PPOTrainer(BaseRLTrainer):
 
             ######### Suppose the location of the sound source is known ################
             pose_all = observations[0]['pose']
+            # print("first:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
             if pose_all[-1]==0:
                 state = sim.get_agent_state()
                 current_position = state.position
                 angle          = state.rotation
-                angle             = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
+                angle          = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
                 self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
                 refiner.reset(new_center_pose=current_position)
                 print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
+            spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
+            depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
+            depth = depth.permute(2,0,1).to(self.device)      
+            rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).unsqueeze(0).float().to(self.device)
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
 
-            spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth =  torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-            rgb   = torch.as_tensor(observations[0]['depth']).squeeze(-1).unsqueeze(0).float().to(self.device)
-
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
+            # print(pred_doa,pred_r)
             # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
             # pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
 
@@ -703,8 +706,11 @@ class PPOTrainer(BaseRLTrainer):
             outputs = self.envs.step(actions)
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            if config.DISPLAY_RESOLUTION != model_resolution:
-                resize_observation(observations, model_resolution)
+            # print(observations[0]['depth'].max(),observations[0]['depth'].min(),observations[0]['rgb'].shape)
+
+
+            # if config.DISPLAY_RESOLUTION != model_resolution:
+            #     resize_observation(observations, model_resolution)
 
             batch = batch_obs(observations, self.device)
             if len(self.config.VIDEO_OPTION) > 0:

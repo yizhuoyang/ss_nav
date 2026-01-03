@@ -74,7 +74,7 @@ class MapNavEnv(habitat.RLEnv):
         if len(self._config.VIDEO_OPTION) > 0:
             rgb_frames = list()
             audios = list()
-        print("prediction_interval:",self._config.PREDICTION_INTERVAL)
+        # print("prediction_interval:",self._config.PREDICTION_INTERVAL)
         for step_count in range(self._config.PREDICTION_INTERVAL):
             if step_count != 0 and not self.planner.check_navigability(goal):
                 cant_reach_waypoint = True
