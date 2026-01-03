@@ -17,7 +17,7 @@ import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
-from prob_update_doa import StreamingSourceMapFusion
+from prob_update_doa import StreamingSourceMapFusion, align_for_occ
 from ssl_net_infer import SSLNet,SSLNet_DOA,SSLNet_depth_DOA
 import numpy as np
 import torch
@@ -637,8 +637,8 @@ class PPOTrainer(BaseRLTrainer):
         #     prior_prob=0.01,
         # )
         refiner = StreamingSourceMapFusion(
-            map_size_m=60.0,
-            res=1.0,
+            map_size_m=120.0,
+            res=0.1,
             sigma_Q_cells=0.0,
             beta_r=0.9,
             r_max=30.0,
@@ -695,9 +695,11 @@ class PPOTrainer(BaseRLTrainer):
                 save_vis=True,
             )
             max_x_world,max_z_world = out['map_argmax_world']
+
             data = {
                 "action": np.array([max_x_world,max_z_world]),
                 # "action": np.array([source_loc[0],source_loc[-1]]),
+                "refiner": refiner,
                 "target_goal": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }

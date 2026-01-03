@@ -8,7 +8,10 @@
 
 from typing import Optional
 import logging
-
+import sys
+sys.path.append("/media/kemove/data/av_nav/network/audionet")
+sys.path.append("/media/kemove/data/av_nav/utlis")
+from prob_update_doa import StreamingSourceMapFusion, align_for_occ
 import numpy as np
 import habitat
 import torch
@@ -54,17 +57,24 @@ class MapNavEnv(habitat.RLEnv):
         return observations
 
     def step(self, *args, **kwargs):
-        world_goal = kwargs["action"]
+        # world_goal = kwargs["action"]
         target_goal = kwargs["target_goal"]
+        geometric_map, _,_,_,_ = self.planner.mapper.get_maps_and_agent_pose()
+        obs = geometric_map[:, :, 0] > 0.5   # obstacle
+        # sound_map   = kwargs["sound_map"]
+        refiner     = kwargs["refiner"]
+        agent_pose = kwargs["agent_pos"]
+
+        sound_map         = refiner.P
+        sound_map_rotate   = align_for_occ(sound_map.T)
+        sound_map_refine   = (1-obs) * sound_map_rotate
+        sound_map          = align_for_occ(sound_map_refine).T
+        refiner.P          = sound_map
+        world_goal,_         = refiner._readout(agent_pose[0],agent_pose[1])
         # num_step = kwargs["step"]
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
-        _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
-        # intermediate_goal = self.planner.goal_to_intermediate_goal(goal)
-        # waypoint_map = self.planner.get_map_coordinates(intermediate_goal)  # 这是“当前一步的局部 waypoint”
-        # self._previous_action = intermediate_goal
-        # print(goal,self.planner.mapper._world_x0,self.planner.mapper._world_z0,)
-        # stop = int(self._config.TASK_CONFIG.TASK.ACTION_MAP.MAP_SIZE ** 2 // 2) == intermediate_goal
-        agent_pose = kwargs["agent_pos"]
+        # _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
+
         stop = np.linalg.norm(target_goal - agent_pose) <=0.5
         observation = self._previous_observation
         cumulative_reward = 0
