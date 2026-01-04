@@ -240,11 +240,11 @@ class AudioGoalPredictor(nn.Module):
 
         out_feat = self.fusion_fc(spec_film)           # (B, fusion_out_dim)
 
-
-        doa_logits = self.doa_head(out_feat)
+        # TODO
+        doa_logits = self.doa_head(spec_feat)
         doa_logits = torch.sigmoid(doa_logits)
 
-        distance_logits = self.distance_head(out_feat)
+        distance_logits = self.distance_head(spec_feat)
         distance_logits = torch.sigmoid(distance_logits)
 
         return doa_logits, distance_logits
