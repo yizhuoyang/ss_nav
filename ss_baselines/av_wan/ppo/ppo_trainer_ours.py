@@ -5,7 +5,7 @@
 
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
+import cv2
 import os
 import time
 import logging
@@ -16,9 +16,12 @@ import random
 import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
+sys.path.append("/media/kemove/data/av_nav/network/visual_infer")
+from yolo_heatmap import yolo_infer, mask_depth_to_binary_topdown, StreamingVisualMapFusion
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
 from prob_update_doa import StreamingSourceMapFusion, align_for_occ
 from ssl_net_infer import SSLNet,SSLNet_DOA,SSLNet_depth_DOA
+from ultralytics import YOLO
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import LambdaLR
@@ -42,6 +45,8 @@ from ss_baselines.common.utils import (
 )
 from ss_baselines.av_wan.ppo import AudioNavBaselinePolicy
 from ss_baselines.av_wan.ppo import PPO
+
+
 
 
 @baseline_registry.register_trainer(name="AVWanTrainer")
@@ -629,31 +634,25 @@ class PPOTrainer(BaseRLTrainer):
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
 
-        # refiner = GlobalSoundMapRefiner(
-        #     H_l=H_l,
-        #     W_l=W_l,
-        #     meters_per_pixel=meters_per_pixel,
-        #     decay=0.8,
-        #     prior_prob=0.01,
-        # )
         refiner = StreamingSourceMapFusion(
-            map_size_m=120.0,
+            map_size_m=60.0,
             res=0.1,
             sigma_Q_cells=0.0,
             beta_r=0.9,
             r_max=30.0,
             intensity_zero_eps=0.0,
-            out_dir="debug_plan_new/fusion_stream_debug",
+            out_dir="debug_plan_new_test/fusion_stream_debug",
             save_every=1,
         )
-
+        vis_fuser = StreamingVisualMapFusion(map_size_m=60.0, res=0.1, use_logodds=False)
+        model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
                 and self.envs.num_envs > 0
         ):
             current_episodes = self.envs.current_episodes()
-
+            object_class = current_episodes[0].object_category
             ######### Suppose the location of the sound source is known ################
             pose_all = observations[0]['pose']
             # print("first:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
@@ -664,12 +663,16 @@ class PPOTrainer(BaseRLTrainer):
                 angle          = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
                 self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
                 refiner.reset(new_center_pose=current_position)
+                vis_fuser.reset(new_center_pose=current_position)
+                names = [object_class]
+                model_yolo.set_classes(names, model_yolo.get_text_pe(names))
                 print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
             depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
             depth = depth.permute(2,0,1).to(self.device)      
-            rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).unsqueeze(0).float().to(self.device)
+            rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
+            rgb     = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
@@ -678,6 +681,17 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
+
+            mask = yolo_infer(model_yolo,rgb/255,device='cuda')
+            mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+            heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                      max_depth_m=10.0,
+                                                      depth_is_normalized=True,
+                                                      grid_size=100,
+                                                      map_meters=10.0)
+
+
+
             # print(pred_doa,pred_r)
             # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
             # pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
@@ -696,10 +710,18 @@ class PPOTrainer(BaseRLTrainer):
             )
             max_x_world,max_z_world = out['map_argmax_world']
 
+            vis_fuser.update_frame(
+                local_heat=heat_local,
+                pose=current_position,     
+                heading=heading,
+                local_map_meters=10.0,
+                local_grid_size=100,
+                threshold=0.5)
+
             data = {
                 "action": np.array([max_x_world,max_z_world]),
-                # "action": np.array([source_loc[0],source_loc[-1]]),
                 "refiner": refiner,
+                "vis_fuser": vis_fuser,
                 "target_goal": np.array([source_loc[0],source_loc[-1]]),
                 "agent_pos": np.array([current_position[0],current_position[-1]])
             }

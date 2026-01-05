@@ -19,6 +19,40 @@ from habitat import Config, Dataset
 from habitat.utils.visualizations.utils import observations_to_image
 from ss_baselines.common.baseline_registry import baseline_registry
 from ss_baselines.av_wan.models.planner import Planner
+try:
+    from scipy.ndimage import gaussian_filter as _gaussian_filter
+except Exception:
+    _gaussian_filter = None
+
+def gaussian_smooth(P, sigma):
+    if sigma is None or sigma <= 0:
+        return P
+    if _gaussian_filter is not None:
+        return _gaussian_filter(P, sigma=sigma, mode="nearest")
+
+    radius = int(np.ceil(3 * sigma))
+    x = np.arange(-radius, radius + 1, dtype=np.float32)
+    k = np.exp(-(x**2) / (2 * (sigma**2) + 1e-12))
+    k = k / (k.sum() + 1e-12)
+
+    def conv1d_axis(A, axis):
+        pad = [(0, 0)] * A.ndim
+        pad[axis] = (radius, radius)
+        Ap = np.pad(A, pad, mode="edge")
+        out = np.zeros_like(A, dtype=np.float32)
+
+        if axis == 1:  # x
+            for i in range(A.shape[1]):
+                out[:, i] = (Ap[:, i:i + 2 * radius + 1] * k[None, :]).sum(axis=1)
+        else:  # y
+            for i in range(A.shape[0]):
+                out[i, :] = (Ap[i:i + 2 * radius + 1, :] * k[:, None]).sum(axis=0)
+        return out
+
+    A = A.astype(np.float32)
+    A = conv1d_axis(A, axis=1)
+    A = conv1d_axis(A, axis=0)
+    return A
 
 
 @baseline_registry.register_env(name="MapNavEnv")
@@ -61,19 +95,30 @@ class MapNavEnv(habitat.RLEnv):
         target_goal = kwargs["target_goal"]
         geometric_map, _,_,_,_ = self.planner.mapper.get_maps_and_agent_pose()
         obs = geometric_map[:, :, 0] > 0.5   # obstacle
-        # sound_map   = kwargs["sound_map"]
         refiner     = kwargs["refiner"]
+        vis_fuser   = kwargs["vis_fuser"]
         agent_pose = kwargs["agent_pos"]
 
-        sound_map         = refiner.P
+        sound_map          = refiner.P
         sound_map_rotate   = align_for_occ(sound_map.T)
         sound_map_refine   = (1-obs) * sound_map_rotate
         sound_map          = align_for_occ(sound_map_refine).T
+
+        # sound_map_gaussian = gaussian_smooth(sound_map, sigma=8)
+        # vis_map            = vis_fuser.P
+
+        # if vis_map is None or np.max(vis_map) <= 0:
+        #     refiner.P          = sound_map_gaussian
+
+        # else:
+
+        #     fused = (vis_map + 1e-6) * (sound_map_gaussian + 1e-6)
+        #     refiner.P          = fused
         refiner.P          = sound_map
-        world_goal,_         = refiner._readout(agent_pose[0],agent_pose[1])
-        # num_step = kwargs["step"]
+        world_goal,_       = refiner._readout(agent_pose[0],agent_pose[1])
+        # refiner.P          = sound_map
+
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
-        # _,_,agent_x,agent_y,_ = self.planner.mapper.get_maps_and_agent_pose()
 
         stop = np.linalg.norm(target_goal - agent_pose) <=0.5
         observation = self._previous_observation
@@ -84,7 +129,6 @@ class MapNavEnv(habitat.RLEnv):
         if len(self._config.VIDEO_OPTION) > 0:
             rgb_frames = list()
             audios = list()
-        # print("prediction_interval:",self._config.PREDICTION_INTERVAL)
 
         for step_count in range(self._config.PREDICTION_INTERVAL):
             if step_count != 0 and not self.planner.check_navigability(goal):

@@ -15,3 +15,5 @@ my_script
 /video_sem
 /cache
 /video_*
+*.ts
+*.pt
