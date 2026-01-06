@@ -482,6 +482,9 @@ class PPOTrainer(BaseRLTrainer):
         ############### Load SSL model and checkpoint ##################
         CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
         model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
+        # model = SSLNet_DOA(use_compress=False).to(self.device)
+
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
             ckpt = torch.load(CKPT_PATH, map_location="cpu")
             if "audiogoal_predictor" in ckpt:
@@ -633,19 +636,22 @@ class PPOTrainer(BaseRLTrainer):
 
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
+        map_size = 60.0
 
         refiner = StreamingSourceMapFusion(
-            map_size_m=60.0,
+            map_size_m=map_size,
             res=0.1,
             sigma_Q_cells=0.0,
-            beta_r=0.9,
+            beta_r=0.2,
             r_max=30.0,
             intensity_zero_eps=0.0,
-            out_dir="debug_plan_new_test/fusion_stream_debug",
+            out_dir="debug_plan_test/fusion_stream_debug",
             save_every=1,
         )
-        vis_fuser = StreamingVisualMapFusion(map_size_m=60.0, res=0.1, use_logodds=False)
-        model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
+        use_visual = False
+        if use_visual:
+            vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
+            model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
@@ -653,6 +659,10 @@ class PPOTrainer(BaseRLTrainer):
         ):
             current_episodes = self.envs.current_episodes()
             object_class = current_episodes[0].object_category
+            episode_id = current_episodes[0].episode_id
+            current_scenc = sim._current_scene
+            scene_dir = os.path.dirname(current_scenc)
+            scene_name = os.path.basename(scene_dir)
             ######### Suppose the location of the sound source is known ################
             pose_all = observations[0]['pose']
             # print("first:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
@@ -663,10 +673,11 @@ class PPOTrainer(BaseRLTrainer):
                 angle          = quaternion_to_heading_y(angle.w, angle.x, angle.y, angle.z)
                 self.envs.workers[0]._env.planner.mapper.reset(current_position[0],current_position[-1],angle)
                 refiner.reset(new_center_pose=current_position)
-                vis_fuser.reset(new_center_pose=current_position)
-                names = [object_class]
-                model_yolo.set_classes(names, model_yolo.get_text_pe(names))
-                print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
+                if use_visual:
+                    vis_fuser.reset(new_center_pose=current_position)
+                    names = [object_class]
+                    model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
             depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
@@ -682,24 +693,19 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
 
-            mask = yolo_infer(model_yolo,rgb/255,device='cuda')
-            mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-            heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                                                      max_depth_m=10.0,
-                                                      depth_is_normalized=True,
-                                                      grid_size=100,
-                                                      map_meters=10.0)
+            if use_visual:
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.2)
+                mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                        max_depth_m=10.0,
+                                                        depth_is_normalized=True,
+                                                        grid_size=100,
+                                                        map_meters=10.0)
 
-
-
-            # print(pred_doa,pred_r)
-            # pred_prob = torch.sigmoid(predicted_heatmap)[0, 0].detach().cpu().numpy()   # (64, 64)
-            # pred_prob = (pred_prob-pred_prob.min())/(pred_prob.max()-pred_prob.min())
 
             agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
             audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
             # print(audio_intensity)
-            # max_x_world, max_z_world = localmap_argmax_world(pred_prob, agent_x, agent_z, heading, meters_per_pixel)
             out = refiner.update_frame(
                 pred_theta=pred_doa,
                 pred_r=pred_r,
@@ -707,31 +713,47 @@ class PPOTrainer(BaseRLTrainer):
                 heading=heading,
                 audio_intensity=audio_intensity,
                 save_vis=True,
+                id_name=f"{scene_name}_ep{episode_id}"
             )
             max_x_world,max_z_world = out['map_argmax_world']
+            if use_visual:
+                vis_fuser.update_frame(
+                    local_heat=heat_local,
+                    pose=current_position,     
+                    heading=heading,
+                    local_map_meters=10.0,
+                    local_grid_size=100,
+                    threshold=0.5,
+                    save_vis=True,
+                    id_name=f"{scene_name}_ep{episode_id}")
 
-            vis_fuser.update_frame(
-                local_heat=heat_local,
-                pose=current_position,     
-                heading=heading,
-                local_map_meters=10.0,
-                local_grid_size=100,
-                threshold=0.5)
-
-            data = {
+            if use_visual:
+                data = {
+                    "action": np.array([max_x_world,max_z_world]),
+                    "refiner": refiner,
+                    "vis_fuser": vis_fuser,
+                    "target_goal": np.array([source_loc[0],source_loc[-1]]),
+                    "agent_pos": np.array([current_position[0],current_position[-1]]),
+                    "audio_intensity": audio_intensity,
+                    "use_visual": use_visual,
+                    "id_name": f"{scene_name}_ep{episode_id}"
+                }
+            else:
+                data = {
                 "action": np.array([max_x_world,max_z_world]),
+                "vis_fuser": None,
                 "refiner": refiner,
-                "vis_fuser": vis_fuser,
                 "target_goal": np.array([source_loc[0],source_loc[-1]]),
-                "agent_pos": np.array([current_position[0],current_position[-1]])
-            }
+                "agent_pos": np.array([current_position[0],current_position[-1]]),
+                "audio_intensity": audio_intensity,
+                "use_visual": use_visual,
+                "id_name": f"{scene_name}_ep{episode_id}"
+                }
+
             # print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
             actions = [data]
             outputs = self.envs.step(actions)
-
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            # print(observations[0]['depth'].max(),observations[0]['depth'].min(),observations[0]['rgb'].shape)
-
 
             # if config.DISPLAY_RESOLUTION != model_resolution:
             #     resize_observation(observations, model_resolution)

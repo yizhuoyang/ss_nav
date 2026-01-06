@@ -21,6 +21,39 @@ def to_array(x):
     return x
 
 
+def get_fixed_patch_with_pad(big_map, bottom, left, win=31, pad_value=0):
+    """
+    在 big_map 上“无论如何”取到固定 (win,win,C) patch：
+    - big_map 越界部分用 pad_value 补
+    - 返回 patch 以及写回时 big_map 内部的有效区域坐标
+    """
+    H, W, C = big_map.shape
+    # 让任意 bottom/left 都能取到 win：pad 至少 win
+    pad = win
+    big_pad = np.pad(big_map,
+                     ((pad, pad), (pad, pad), (0, 0)),
+                     mode="constant",
+                     constant_values=pad_value)
+
+    # 在 padded 坐标系下切
+    b = bottom + pad
+    l = left + pad
+    patch = big_pad[b:b+win, l:l+win, :]   # 一定是 (win,win,C)
+
+    # 计算 patch 对应到原图的重叠区域，用于写回（只写回原图范围内）
+    b0 = max(0, bottom)
+    l0 = max(0, left)
+    t0 = min(H, bottom + win)
+    r0 = min(W, left + win)
+
+    # patch 内对应区域
+    pb0 = b0 - bottom
+    pl0 = l0 - left
+    pt0 = pb0 + (t0 - b0)
+    pr0 = pl0 + (r0 - l0)
+
+    return patch, (b0, t0, l0, r0), (pb0, pt0, pl0, pr0)
+
 class Mapper(nn.Module):
     def __init__(self, gm_config, am_config, action_map_config, use_acoustic_map):
         super(Mapper, self).__init__()
@@ -120,8 +153,16 @@ class Mapper(nn.Module):
         # does not update the agent's current location
         top = rotated_y
         bottom = top - ego_map.shape[0]
-        rotated_geometric_map[bottom: top, left: right, :] = \
-            np.logical_or(rotated_geometric_map[bottom: top, left: right, :] > 0.5, ego_map > 0.5)
+        # rotated_geometric_map[bottom: top, left: right, :] = \
+        #     np.logical_or(rotated_geometric_map[bottom: top, left: right, :] > 0.5, ego_map > 0.5)
+
+        win = 31
+        patch, (b0,t0,l0,r0), (pb0,pt0,pl0,pr0) = get_fixed_patch_with_pad(
+            rotated_geometric_map, bottom, left, win=win, pad_value=0
+        )
+        assert patch.shape == (31,31,2)
+        fused_patch = np.logical_or(patch > 0.5, ego_map > 0.5).astype(rotated_geometric_map.dtype)
+        rotated_geometric_map[b0:t0, l0:r0, :] = fused_patch[pb0:pt0, pl0:pr0, :]
 
         # update acoustic map
         if self._use_acoustic_map:

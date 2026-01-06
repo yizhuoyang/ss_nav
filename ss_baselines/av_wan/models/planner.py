@@ -68,7 +68,7 @@ class Planner:
         self._last_collided = False
         self._block_forward_steps = 0
 
-        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan_new_test"
+        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan_test"
         os.makedirs(self._debug_dir, exist_ok=True)
         self._debug_step = 0
         self._debug_every = 1  # 每步都画；想降低开销可设 5/10
@@ -159,7 +159,7 @@ class Planner:
     # -----------------------------
     # core planning (GLOBAL MAP GOAL)
     # -----------------------------
-    def plan(self, observation: dict, goal, stop, distribution=None) -> torch.Tensor:
+    def plan(self, observation: dict, goal, stop, distribution=None,id_name='exp') -> torch.Tensor:
         """
         goal: (gx, gy) in GLOBAL MAP INDEX (internal geometric map coordinates)
         stop: bool
@@ -180,7 +180,7 @@ class Planner:
         cur_node = self._node_id(xg, yg)
         tgt_node = self._node_id(ggx, ggy)
 
-        print(xg,yg,gx,gy)
+        # print(xg,yg,gx,gy)
         # if cur_node in self._graph and tgt_node in self._graph:
         #     print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
 
@@ -222,7 +222,7 @@ class Planner:
             idx = 1
         inter_node = path[idx]
         inter_xy = self._graph.nodes[inter_node]["map_index"]
-        print( self._graph.nodes[path[1]]["map_index"],x,y)
+        # print( self._graph.nodes[path[1]]["map_index"],x,y)
 
         # ===== debug draw =====
         if (self._debug_step % self._debug_every) == 0:
@@ -234,7 +234,7 @@ class Planner:
                 inter_xy=inter_xy,
                 path_nodes=path,
                 orientation = orientation,
-                save_prefix="plan"
+                save_prefix=id_name,
             )
         self._debug_step += 1
 
@@ -297,12 +297,12 @@ class Planner:
     # -----------------------------
     # planning with WORLD GOAL
     # -----------------------------
-    def plan_world(self, observation: dict, goal_world, stop, distribution=None):
+    def plan_world(self, observation: dict, goal_world, stop, distribution=None,id_name='exp'):
         """
         goal_world: (wx, wz)
         """
         gx, gy = self.mapper.world_to_map(goal_world[0], goal_world[1])
-        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution)
+        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution,id_name=id_name)
 
     # -----------------------------
     # helper: goal <-> intermediate (kept)
@@ -674,12 +674,12 @@ class Planner:
         plt.legend(loc="lower right", fontsize=9, framealpha=0.85)
         plt.tight_layout()
 
-        out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}.png")
+        out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:03d}.png")
         plt.savefig(out_png, dpi=150)
         plt.close(fig)
 
-        out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
-        np.save(out_np, np.array(path_xy, dtype=np.int32))
+        # out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
+        # np.save(out_np, np.array(path_xy, dtype=np.int32))
 
 
     def _pick_frontier_node(self, geometric_map, cur_node, goal_xy, max_samples=3000, step=4,

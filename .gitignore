@@ -17,3 +17,4 @@ my_script
 /video_*
 *.ts
 *.pt
+vis_results.py
