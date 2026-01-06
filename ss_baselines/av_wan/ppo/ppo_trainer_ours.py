@@ -535,38 +535,7 @@ class PPOTrainer(BaseRLTrainer):
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
-        # self.envs = construct_envs(
-        #     config, get_env_class(config.ENV_NAME)
-        # )
-        #——————————————————————————Code for skip———————————————————————————————————#
-        # SKIP_EPISODES = 100
-        #
-        # habitat_env = self.envs.workers[0]._env.habitat_env
-        # dataset = habitat_env._dataset
-        #
-        # total_eps = len(dataset.episodes)
-        # print("[DEBUG] total episodes in split:", total_eps)
-        #
-        # if total_eps <= SKIP_EPISODES:
-        #     print(
-        #         f"[WARN] 数据集中只有 {total_eps} 个 episodes，"
-        #         f"小于或等于 SKIP_EPISODES={SKIP_EPISODES}，无法跳过这么多。"
-        #     )
-        # else:
-        #     dataset.episodes = dataset.episodes[SKIP_EPISODES:]
-        #     print(
-        #         f"[INFO] 裁剪 episodes: 原本 {total_eps}，"
-        #         f"现在 {len(dataset.episodes)} (从原第 {SKIP_EPISODES} 个开始)"
-        #     )
-        #     if hasattr(habitat_env, "_episode_iterator"):
-        #         habitat_env._episode_iterator = iter(dataset.episodes)
-        #         print("[INFO] 直接用 iter(dataset.episodes) 重建 _episode_iterator")
-        #     else:
-        #         print("[WARN] habitat_env 没有 _episode_iterator 属性，这个版本的内部实现不一样，需要再查一下。")
-        #
-        # sim = habitat_env.sim
-        #——————————————————————————Code for skip———————————————————————————————————#
-        #
+ 
         habitat_env = self.envs.workers[0]._env.habitat_env
         sim = habitat_env.sim
 
@@ -652,7 +621,7 @@ class PPOTrainer(BaseRLTrainer):
         save_vis   = False
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
-            model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
+            model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11m-seg.pt")
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
@@ -695,7 +664,7 @@ class PPOTrainer(BaseRLTrainer):
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
 
             if use_visual:
-                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.2)
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
                 mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
                 heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
                                                         max_depth_m=10.0,

@@ -81,6 +81,7 @@ class Planner:
         self._prev_next_node = None
         self._prev_action = None
         self._obstacles = []
+        self._debug_step = 0
         self.mapper.reset()
 
         # restore removed nodes/edges if any

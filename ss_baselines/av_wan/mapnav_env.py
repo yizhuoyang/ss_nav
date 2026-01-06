@@ -106,13 +106,13 @@ class MapNavEnv(habitat.RLEnv):
 
         sound_map          = refiner.P
         sound_map_rotate   = align_for_occ(sound_map.T)
-        sound_map_refine   = (1-obs) * sound_map_rotate
+        sound_map_refine   = sound_map_rotate
         sound_map          = align_for_occ(sound_map_refine).T
 
         if use_visual and audio_intensity ==0:
             sound_map_gaussian = gaussian_smooth(sound_map, sigma=8)
             exp = geometric_map[:, :, 1] > 0.5  
-            vis_map            = (1-obs) * gaussian_smooth(vis_fuser.P,sigma=1)*exp
+            vis_map            = vis_fuser.P
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
             else:
@@ -181,58 +181,58 @@ class MapNavEnv(habitat.RLEnv):
             if done or reaching_waypoint:
                 break
 
-            # --------- 执行最终非 TURN 的动作（期望是 MOVE_FORWARD） ---------
-            observation, reward, done, info = super().step({"action": action})
-
-            if len(self._config.VIDEO_OPTION) > 0:
-                if "rgb" not in observation:
-                    observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
-                                                self.config.DISPLAY_RESOLUTION, 3))
-                frame = observations_to_image(observation, info)
-                rgb_frames.append(frame)
-                audios.append(observation['audiogoal'])
-
-            cumulative_reward += reward
-
-            if done:
-                self.planner.reset()
-                observation = self.reset()
-                break
-            else:
-                self.planner.update_map_and_graph(observation)
-
-                x, y = self.planner.mapper.get_maps_and_agent_pose()[2:4]
-                if (x - goal[0]) == (y - goal[1]) == 0:
-                    reaching_waypoint = True
-                    break
-
-        
-        # for step_count in range(self._config.PREDICTION_INTERVAL):
-        #     if step_count != 0 and not self.planner.check_navigability(goal):
-        #         cant_reach_waypoint = True
-        #         break
-        #     # action = self.planner.plan(observation, waypoint_map, stop=stop)
-        #     action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+        #     # --------- 执行最终非 TURN 的动作（期望是 MOVE_FORWARD） ---------
         #     observation, reward, done, info = super().step({"action": action})
+
         #     if len(self._config.VIDEO_OPTION) > 0:
         #         if "rgb" not in observation:
         #             observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
-        #                                            self.config.DISPLAY_RESOLUTION, 3))
+        #                                         self.config.DISPLAY_RESOLUTION, 3))
         #         frame = observations_to_image(observation, info)
         #         rgb_frames.append(frame)
         #         audios.append(observation['audiogoal'])
+
         #     cumulative_reward += reward
+
         #     if done:
         #         self.planner.reset()
         #         observation = self.reset()
         #         break
         #     else:
         #         self.planner.update_map_and_graph(observation)
-        #         # reaching intermediate goal
+
         #         x, y = self.planner.mapper.get_maps_and_agent_pose()[2:4]
         #         if (x - goal[0]) == (y - goal[1]) == 0:
         #             reaching_waypoint = True
         #             break
+
+        
+        for step_count in range(self._config.PREDICTION_INTERVAL):
+            if step_count != 0 and not self.planner.check_navigability(goal):
+                cant_reach_waypoint = True
+                break
+            # action = self.planner.plan(observation, waypoint_map, stop=stop)
+            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+            observation, reward, done, info = super().step({"action": action})
+            if len(self._config.VIDEO_OPTION) > 0:
+                if "rgb" not in observation:
+                    observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
+                                                   self.config.DISPLAY_RESOLUTION, 3))
+                frame = observations_to_image(observation, info)
+                rgb_frames.append(frame)
+                audios.append(observation['audiogoal'])
+            cumulative_reward += reward
+            if done:
+                self.planner.reset()
+                observation = self.reset()
+                break
+            else:
+                self.planner.update_map_and_graph(observation)
+                # reaching intermediate goal
+                x, y = self.planner.mapper.get_maps_and_agent_pose()[2:4]
+                if (x - goal[0]) == (y - goal[1]) == 0:
+                    reaching_waypoint = True
+                    break
 
         if not done:
             self.planner.add_maps_to_observation(observation)
