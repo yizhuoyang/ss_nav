@@ -153,8 +153,9 @@ class Mapper(nn.Module):
         # does not update the agent's current location
         top = rotated_y
         bottom = top - ego_map.shape[0]
+
         # rotated_geometric_map[bottom: top, left: right, :] = \
-        #     np.logical_or(rotated_geometric_map[bottom: top, left: right, :] > 0.5, ego_map > 0.5)
+            # np.logical_or(rotated_geometric_map[bottom: top, left: right, :] > 0.5, ego_map > 0.5)
 
         win = 31
         patch, (b0,t0,l0,r0), (pb0,pt0,pl0,pr0) = get_fixed_patch_with_pad(
