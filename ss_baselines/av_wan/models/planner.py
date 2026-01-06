@@ -159,7 +159,7 @@ class Planner:
     # -----------------------------
     # core planning (GLOBAL MAP GOAL)
     # -----------------------------
-    def plan(self, observation: dict, goal, stop, distribution=None,id_name='exp') -> torch.Tensor:
+    def plan(self, observation: dict, goal, stop, distribution=None,id_name='exp',save_vis=False,source=None) -> torch.Tensor:
         """
         goal: (gx, gy) in GLOBAL MAP INDEX (internal geometric map coordinates)
         stop: bool
@@ -222,20 +222,22 @@ class Planner:
             idx = 1
         inter_node = path[idx]
         inter_xy = self._graph.nodes[inter_node]["map_index"]
-        # print( self._graph.nodes[path[1]]["map_index"],x,y)
 
         # ===== debug draw =====
-        if (self._debug_step % self._debug_every) == 0:
-            self._plot_plan_debug(
-                geometric_map=geometric_map,
-                cur_xy=(xg, yg),
-                goal_xy=(gx, gy),
-                goal_snap_xy=(ggx, ggy),
-                inter_xy=inter_xy,
-                path_nodes=path,
-                orientation = orientation,
-                save_prefix=id_name,
-            )
+        if save_vis:
+            if source is not None:
+                ggx, ggy = int(source[0]), int(source[1])
+            if (self._debug_step % self._debug_every) == 0:
+                self._plot_plan_debug(
+                    geometric_map=geometric_map,
+                    cur_xy=(xg, yg),
+                    goal_xy=(gx, gy),
+                    goal_snap_xy=(ggx, ggy),
+                    inter_xy=inter_xy,
+                    path_nodes=path,
+                    orientation = orientation,
+                    save_prefix=id_name,
+                )
         self._debug_step += 1
 
         def graph_dist_from_mapxy_to_inter(x_map, y_map):
@@ -297,12 +299,13 @@ class Planner:
     # -----------------------------
     # planning with WORLD GOAL
     # -----------------------------
-    def plan_world(self, observation: dict, goal_world, stop, distribution=None,id_name='exp'):
+    def plan_world(self, observation: dict, goal_world, stop, distribution=None,id_name='exp',save_vis=False,source=None):
         """
         goal_world: (wx, wz)
         """
         gx, gy = self.mapper.world_to_map(goal_world[0], goal_world[1])
-        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution,id_name=id_name)
+        sx,sy  = self.mapper.world_to_map(source[0], source[1])
+        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution,id_name=id_name,save_vis=save_vis,source=[sx,sy])
 
     # -----------------------------
     # helper: goal <-> intermediate (kept)

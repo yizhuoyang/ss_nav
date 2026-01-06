@@ -101,6 +101,8 @@ class MapNavEnv(habitat.RLEnv):
         use_visual  = kwargs["use_visual"]
         audio_intensity = kwargs["audio_intensity"]
         id_name         = kwargs["id_name"]
+        save_vis       = kwargs["save_vis"]
+
 
         sound_map          = refiner.P
         sound_map_rotate   = align_for_occ(sound_map.T)
@@ -211,7 +213,7 @@ class MapNavEnv(habitat.RLEnv):
                 cant_reach_waypoint = True
                 break
             # action = self.planner.plan(observation, waypoint_map, stop=stop)
-            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name)
+            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
             observation, reward, done, info = super().step({"action": action})
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:

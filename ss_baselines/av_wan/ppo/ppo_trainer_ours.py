@@ -648,7 +648,8 @@ class PPOTrainer(BaseRLTrainer):
             out_dir="debug_plan_test/fusion_stream_debug",
             save_every=1,
         )
-        use_visual = False
+        use_visual = True
+        save_vis   = True
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
             model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
@@ -712,7 +713,7 @@ class PPOTrainer(BaseRLTrainer):
                 pose=current_position,
                 heading=heading,
                 audio_intensity=audio_intensity,
-                save_vis=True,
+                save_vis=save_vis,
                 id_name=f"{scene_name}_ep{episode_id}"
             )
             max_x_world,max_z_world = out['map_argmax_world']
@@ -724,7 +725,7 @@ class PPOTrainer(BaseRLTrainer):
                     local_map_meters=10.0,
                     local_grid_size=100,
                     threshold=0.5,
-                    save_vis=True,
+                    save_vis=save_vis,
                     id_name=f"{scene_name}_ep{episode_id}")
 
             if use_visual:
@@ -736,7 +737,8 @@ class PPOTrainer(BaseRLTrainer):
                     "agent_pos": np.array([current_position[0],current_position[-1]]),
                     "audio_intensity": audio_intensity,
                     "use_visual": use_visual,
-                    "id_name": f"{scene_name}_ep{episode_id}"
+                    "id_name": f"{scene_name}_ep{episode_id}",
+                    "save_vis": save_vis
                 }
             else:
                 data = {
@@ -747,7 +749,8 @@ class PPOTrainer(BaseRLTrainer):
                 "agent_pos": np.array([current_position[0],current_position[-1]]),
                 "audio_intensity": audio_intensity,
                 "use_visual": use_visual,
-                "id_name": f"{scene_name}_ep{episode_id}"
+                "id_name": f"{scene_name}_ep{episode_id}",
+                "save_vis": save_vis
                 }
 
             # print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
