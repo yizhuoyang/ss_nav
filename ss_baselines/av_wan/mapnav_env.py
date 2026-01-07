@@ -112,7 +112,7 @@ class MapNavEnv(habitat.RLEnv):
         if use_visual and audio_intensity ==0:
             sound_map_gaussian = gaussian_smooth(sound_map, sigma=8)
             exp = geometric_map[:, :, 1] > 0.5  
-            vis_map            = (1-obs) * gaussian_smooth(vis_fuser.P,sigma=1)*exp
+            vis_map            = vis_fuser.P
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
             else:
