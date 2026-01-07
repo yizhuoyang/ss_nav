@@ -617,7 +617,7 @@ class PPOTrainer(BaseRLTrainer):
             out_dir="debug_plan_test/fusion_stream_debug",
             save_every=1,
         )
-        use_visual = False
+        use_visual = True
         save_vis   = False
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
