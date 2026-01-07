@@ -126,7 +126,7 @@ class MapNavEnv(habitat.RLEnv):
 
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
 
-        stop = np.linalg.norm(target_goal - agent_pose) <=0.5
+        stop = np.linalg.norm(world_goal - agent_pose) <=0.5
         observation = self._previous_observation
         cumulative_reward = 0
         done = False

@@ -480,10 +480,10 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        model = SSLNet_depth_DOA(use_compress=False).to(self.device)
-        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
-        # model = SSLNet_DOA(use_compress=False).to(self.device)
+        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+        CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
+        model = SSLNet_DOA(use_compress=False).to(self.device)
 
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
             ckpt = torch.load(CKPT_PATH, map_location="cpu")
@@ -648,11 +648,11 @@ class PPOTrainer(BaseRLTrainer):
             out_dir="debug_plan_test/fusion_stream_debug",
             save_every=1,
         )
-        use_visual = 
+        use_visual = False
         save_vis   = False
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
-            model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11s-seg.pt")
+            model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11m-seg.pt")
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
