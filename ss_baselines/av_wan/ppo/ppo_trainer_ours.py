@@ -480,10 +480,10 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
-        CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
-        model = SSLNet_DOA(use_compress=False).to(self.device)
+        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
+        # model = SSLNet_DOA(use_compress=False).to(self.device)
 
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
             ckpt = torch.load(CKPT_PATH, map_location="cpu")
@@ -648,7 +648,7 @@ class PPOTrainer(BaseRLTrainer):
             out_dir="debug_plan_test/fusion_stream_debug",
             save_every=1,
         )
-        use_visual = False
+        use_visual = True
         save_vis   = False
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
@@ -695,7 +695,7 @@ class PPOTrainer(BaseRLTrainer):
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
 
             if use_visual:
-                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.2)
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
                 mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
                 heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
                                                         max_depth_m=10.0,

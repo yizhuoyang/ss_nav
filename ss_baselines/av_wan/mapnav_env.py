@@ -112,11 +112,11 @@ class MapNavEnv(habitat.RLEnv):
         if use_visual and audio_intensity ==0:
             sound_map_gaussian = gaussian_smooth(sound_map, sigma=8)
             exp = geometric_map[:, :, 1] > 0.5  
-            vis_map            = vis_fuser.P
+            vis_map            =  gaussian_smooth(vis_fuser.P,sigma=3)
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
             else:
-                fused = ((vis_map + 1e-6)*0.6 + 0.4*(sound_map_gaussian + 1e-6))/2
+                fused = ((vis_map + 1e-6)*0.5 + 0.5*(sound_map_gaussian + 1e-6))
                 refiner.P          = fused
         else:
             refiner.P          = sound_map
@@ -126,7 +126,7 @@ class MapNavEnv(habitat.RLEnv):
 
         goal = self.planner.mapper.world_to_map(world_goal[0],world_goal[1])
 
-        stop = np.linalg.norm(world_goal - agent_pose) <=0.5
+        stop = np.linalg.norm(target_goal - agent_pose) <=0.5
         observation = self._previous_observation
         cumulative_reward = 0
         done = False
