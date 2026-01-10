@@ -39,7 +39,6 @@ def conv_output_dim(dimension, padding, dilation, kernel_size, stride
         )
     return tuple(out_dimension)
 
-
 def layer_init(cnn):
     for layer in cnn:
         if isinstance(layer, (nn.Conv2d, nn.Linear)):
@@ -49,6 +48,24 @@ def layer_init(cnn):
             if layer.bias is not None:
                 nn.init.constant_(layer.bias, val=0)
 
+def add_normalize(to_norm_module, normalize_config, input_shape=None):
+    if normalize_config == "none":
+        return  
+    elif normalize_config == "batchnorm":
+        if isinstance(to_norm_module, nn.Conv2d):
+            return nn.Sequential(to_norm_module, nn.BatchNorm2d(to_norm_module.out_channels))
+        elif isinstance(to_norm_module, nn.Conv1d):
+            return nn.Sequential(to_norm_module, nn.BatchNorm1d(to_norm_module.out_channels))
+        elif isinstance(to_norm_module, nn.Linear):
+            return nn.Sequential(to_norm_module, nn.BatchNorm1d(to_norm_module.out_features))
+        else:
+            raise NotImplementedError
+    elif normalize_config == "layernorm":
+        return nn.Sequential(to_norm_module, nn.LayerNorm(input_shape))
+    elif normalize_config == "spectralnorm":
+        return spectral_norm(to_norm_module)
+    else:
+        raise NotImplementedError
 
 class VisualCNN(nn.Module):
     r"""A Simple 3-Conv CNN followed by a fully connected layer

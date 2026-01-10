@@ -68,7 +68,7 @@ class Planner:
         self._last_collided = False
         self._block_forward_steps = 0
 
-        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan_test"
+        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan"
         os.makedirs(self._debug_dir, exist_ok=True)
         self._debug_step = 0
         self._debug_every = 1  # 每步都画；想降低开销可设 5/10
@@ -159,18 +159,18 @@ class Planner:
     # -----------------------------
     # core planning (GLOBAL MAP GOAL)
     # -----------------------------
-    def plan(self, observation: dict, goal, stop, distribution=None,id_name='exp',save_vis=False,source=None) -> torch.Tensor:
+    def plan(self, observation: dict, goal, stop, distribution=None,id_name='exp',save_vis=False,source=None,near_vis_ok=True) -> torch.Tensor:
         """
         goal: (gx, gy) in GLOBAL MAP INDEX (internal geometric map coordinates)
         stop: bool
         """
         geometric_map, acoustic_map, x, y, orientation = self.mapper.get_maps_and_agent_pose()
 
-        if stop:
-            action = HabitatSimActions.STOP
-            self._prev_next_node = None
-            self._prev_action = action
-            return action
+        # if stop:
+        #     action = HabitatSimActions.STOP
+        #     self._prev_next_node = None
+        #     self._prev_action = action
+        #     return action
 
         # 1) snap current & goal to the nearest navigable grid point (CRITICAL)
         xg, yg = self._snap_to_navigable_grid(x, y)
@@ -179,10 +179,6 @@ class Planner:
 
         cur_node = self._node_id(xg, yg)
         tgt_node = self._node_id(ggx, ggy)
-
-        # print(xg,yg,gx,gy)
-        # if cur_node in self._graph and tgt_node in self._graph:
-        #     print("has_path:", nx.has_path(self._graph, cur_node, tgt_node))
 
         # 2) ensure current node exists
         if cur_node not in self._graph:
@@ -210,10 +206,16 @@ class Planner:
             self._prev_action = action
             return action
 
+        # modift stop criteria: near goal
         if len(path) <= 1:
-            action = HabitatSimActions.STOP
-            self._prev_next_node = None
-            self._prev_action = action
+            if near_vis_ok:
+                action = HabitatSimActions.STOP
+                self._prev_next_node = None
+                self._prev_action = action
+            else:
+                action = HabitatSimActions.TURN_LEFT
+                self._prev_next_node = None
+                self._prev_action = action
             return action
 
         lookahead = 10
@@ -299,13 +301,13 @@ class Planner:
     # -----------------------------
     # planning with WORLD GOAL
     # -----------------------------
-    def plan_world(self, observation: dict, goal_world, stop, distribution=None,id_name='exp',save_vis=False,source=None):
+    def plan_world(self, observation: dict, goal_world, stop, distribution=None,id_name='exp',save_vis=False,source=None,near_vis_ok=True):
         """
         goal_world: (wx, wz)
         """
         gx, gy = self.mapper.world_to_map(goal_world[0], goal_world[1])
         sx,sy  = self.mapper.world_to_map(source[0], source[1])
-        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution,id_name=id_name,save_vis=save_vis,source=[sx,sy])
+        return self.plan(observation, goal=(gx, gy), stop=stop, distribution=distribution,id_name=id_name,save_vis=save_vis,source=[sx,sy],near_vis_ok=near_vis_ok)
 
     # -----------------------------
     # helper: goal <-> intermediate (kept)

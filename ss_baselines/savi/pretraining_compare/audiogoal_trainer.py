@@ -14,8 +14,8 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 from soundspaces.utils import load_metadata
-from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPredictor
-from ss_baselines.savi.pretraining_ours.audiogoal_dataset import AudioGoalDataset
+from ss_baselines.savi.pretraining_compare.audiogoal_predictor import AudioGoalPredictor
+from ss_baselines.savi.pretraining_compare.audiogoal_dataset import AudioGoalDataset
 from ss_baselines.savi.config.default import get_config
 from soundspaces.mp3d_utils import SCENE_SPLITS
 import warnings
@@ -25,7 +25,7 @@ class AudioGoalPredictorTrainer:
     def __init__(self, config, model_dir, predict_label, predict_location):
         self.config = config
         self.model_dir = model_dir
-        self.device = (torch.device("cuda", 0))
+        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
         self.batch_size = 1024
         self.num_worker = 8
@@ -36,7 +36,7 @@ class AudioGoalPredictorTrainer:
                                                       predict_location=predict_location).to(device=self.device)                              
         self.predict_label = predict_label
         self.predict_location = predict_location
-        summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda')
+        # summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda:1')
 
     def run(self, splits, writer=None):
         meta_dir = self.config.TASK_CONFIG.SIMULATOR.AUDIO.METADATA_DIR
@@ -65,7 +65,6 @@ class AudioGoalPredictorTrainer:
                                             pin_memory=True,
                                             num_workers=self.num_worker,
                                             sampler=None,
-
                                             )
 
             dataset_sizes[split] = len(datasets[split])
@@ -120,13 +119,14 @@ class AudioGoalPredictorTrainer:
                     depth = depth.to(device=self.device, dtype=torch.float)
                     inputs = [spectrogram,depth]
                     # gts = gts.to(device=self.device, dtype=torch.float)
-                    theta_gt, dist_gt = gts
+                    theta_gt, dist_gt,class_gt = gts
                     theta_gt = theta_gt.to(device=self.device, dtype=torch.float)
-                    dist_gt = dist_gt.to(device=self.device, dtype=torch.float)
+                    dist_gt  = dist_gt.to(device=self.device, dtype=torch.float)
+                    class_gt = class_gt.to(device=self.device, dtype=torch.float)
                     # zero the parameter gradients
                     optimizer.zero_grad()
                     # forward
-                    predicts_doa,predicts_dis = model({input_type: x for input_type, x in zip(['spectrogram','depth'], inputs)})
+                    predicts_doa,predicts_dis,predicts_class = model({input_type: x for input_type, x in zip(['spectrogram','depth'], inputs)})
 
                     if self.predict_label and self.predict_location:
                         classifier_loss = classifier_criterion(predicts[:, :-2], gts[:, 0].long())
@@ -136,7 +136,7 @@ class AudioGoalPredictorTrainer:
                         regressor_loss = torch.tensor([0], device=self.device)
                     elif self.predict_location:
                         regressor_loss = regressor_criterion(predicts_doa, theta_gt)+0.2*regressor_criterion(predicts_dis, dist_gt)
-                        classifier_loss = torch.tensor([0], device=self.device)
+                        classifier_loss = classifier_criterion(predicts_class, class_gt)
                     else:
                         raise ValueError('Must predict one item.')
                     loss = classifier_loss + regressor_loss
@@ -146,6 +146,9 @@ class AudioGoalPredictorTrainer:
                         loss.backward()
                         optimizer.step()
                         scheduler.step()
+
+                    loss = regressor_loss
+
                     running_total_loss += loss.item() * theta_gt.size(0)
                     running_classifier_loss += classifier_loss.item() * theta_gt.size(0)
                     running_regressor_loss += regressor_loss.item() * theta_gt.size(0)

@@ -11,6 +11,7 @@ import time
 import logging
 from collections import deque
 from typing import Dict, List
+# import laion_clap
 import json
 import random
 import sys
@@ -482,8 +483,15 @@ class PPOTrainer(BaseRLTrainer):
         ############### Load SSL model and checkpoint ##################
         CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
         model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
+
+        # model_al = laion_clap.CLAP_Module(enable_fusion=False)
+        # model_al.load_ckpt() # download the default pretrained checkpoint.
+        # model_al.eval()
+        # print("Import the pretrained CLAP model successfully.")
+        ############### Load SSL model and checkpoint ##################
 
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
             ckpt = torch.load(CKPT_PATH, map_location="cpu")
@@ -637,7 +645,6 @@ class PPOTrainer(BaseRLTrainer):
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
         map_size = 60.0
-
         refiner = StreamingSourceMapFusion(
             map_size_m=map_size,
             res=0.1,
@@ -645,14 +652,19 @@ class PPOTrainer(BaseRLTrainer):
             beta_r=0.2,
             r_max=30.0,
             intensity_zero_eps=0.0,
-            out_dir="debug_plan_test/fusion_stream_debug",
+            out_dir="debug_plan/fusion_stream_debug",
             save_every=1,
         )
+        # refiner.occ_mapper = self.envs.workers[0]._env.planner.mapper
         use_visual = True
         save_vis   = False
         if use_visual:
-            vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan_test/fusion_visual_debug",save_every=1,)
+            vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan/fusion_visual_debug",save_every=1,)
             model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11m-seg.pt")
+
+        # load pre-calculated embedding for audio-lang mapping
+        # id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
+        # text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").cuda()
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
@@ -737,8 +749,9 @@ class PPOTrainer(BaseRLTrainer):
                     "agent_pos": np.array([current_position[0],current_position[-1]]),
                     "audio_intensity": audio_intensity,
                     "use_visual": use_visual,
-                    "id_name": f"{scene_name}_ep{episode_id}",
-                    "save_vis": save_vis
+                    "id_name": f"{scene_name}_{episode_id}_{object_class}",
+                    "save_vis": save_vis,
+                    "step": pose_all[-1]
                 }
             else:
                 data = {
@@ -750,14 +763,16 @@ class PPOTrainer(BaseRLTrainer):
                 "audio_intensity": audio_intensity,
                 "use_visual": use_visual,
                 "id_name": f"{scene_name}_ep{episode_id}",
-                "save_vis": save_vis
+                "save_vis": save_vis,
+                "step": pose_all[-1]
                 }
 
             # print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
             actions = [data]
             outputs = self.envs.step(actions)
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-
+            if pose_all[-1]>=295:
+                print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
             # if config.DISPLAY_RESOLUTION != model_resolution:
             #     resize_observation(observations, model_resolution)
 
