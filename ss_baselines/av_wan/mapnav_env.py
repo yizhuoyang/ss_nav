@@ -102,6 +102,7 @@ class MapNavEnv(habitat.RLEnv):
         audio_intensity = kwargs["audio_intensity"]
         id_name         = kwargs["id_name"]
         save_vis       = kwargs["save_vis"]
+        step           = kwargs["step"]
 
 
         sound_map          = refiner.P
@@ -176,12 +177,16 @@ class MapNavEnv(habitat.RLEnv):
                     break
 
                 action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
-            # 如果 turn-loop 里已经 done 或 reaching_waypoint，就结束本次 interval
+
             if done or reaching_waypoint:
                 break
 
-            # --------- 执行最终非 TURN 的动作（期望是 MOVE_FORWARD） ---------
+            if self._env.sim._episode_step_count==499:
+                action = HabitatSimActions.STOP
+
             observation, reward, done, info = super().step({"action": action})
+
+            # print(self._env.sim._episode_step_count,action,self._env.task.is_stop_called,self._distance_target())
 
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:
@@ -266,7 +271,6 @@ class MapNavEnv(habitat.RLEnv):
         if self._episode_success():
             reward += self._rl_config.SUCCESS_REWARD
             logging.debug('Reaching goal!')
-
         return reward
 
     def _distance_target(self):

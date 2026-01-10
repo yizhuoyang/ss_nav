@@ -656,7 +656,7 @@ class PPOTrainer(BaseRLTrainer):
             save_every=1,
         )
         # refiner.occ_mapper = self.envs.workers[0]._env.planner.mapper
-        use_visual = True
+        use_visual = False
         save_vis   = False
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan/fusion_visual_debug",save_every=1,)
@@ -665,6 +665,8 @@ class PPOTrainer(BaseRLTrainer):
         # load pre-calculated embedding for audio-lang mapping
         # id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
         # text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").cuda()
+        total_exp   = 0
+        success_exp = 0
 
         while (
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
@@ -770,9 +772,11 @@ class PPOTrainer(BaseRLTrainer):
             # print("source loc:",source_loc[0],source_loc[-1],"pred loc:",max_x_world,max_z_world,"agnet_pos:",current_position[0],current_position[-1])
             actions = [data]
             outputs = self.envs.step(actions)
+
+
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            if pose_all[-1]>=295:
-                print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
+            # if pose_all[-1]>=295:
+                # print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
             # if config.DISPLAY_RESOLUTION != model_resolution:
             #     resize_observation(observations, model_resolution)
 
@@ -834,7 +838,10 @@ class PPOTrainer(BaseRLTrainer):
                         )
                     ] = episode_stats
                     t.update()
-
+                    if infos[i]['success'] == 1:
+                        success_exp += 1
+                    total_exp += 1
+                    print("success rate:",success_exp/total_exp, "dsistance to goal:",infos[i]['distance_to_goal'])
                     if len(self.config.VIDEO_OPTION) > 0:
                         if self.config.VISUALIZE_FAILURE_ONLY and infos[i]['success'] > 0:
                             pass
