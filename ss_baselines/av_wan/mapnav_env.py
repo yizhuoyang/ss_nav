@@ -145,12 +145,13 @@ class MapNavEnv(habitat.RLEnv):
 
             max_turns = 4
             n_turns = 0
-
-            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+            if self._env.sim._episode_step_count==500:
+                action = HabitatSimActions.STOP
+            else:
+                action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
 
             while action in (HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT):
                 observation, reward, done, info = super().step({"action": action})
-
                 if len(self._config.VIDEO_OPTION) > 0:
                     if "rgb" not in observation:
                         observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
@@ -176,18 +177,19 @@ class MapNavEnv(habitat.RLEnv):
                 if n_turns >= max_turns:
                     break
 
-                action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+                if self._env.sim._episode_step_count==500:
+                    action = HabitatSimActions.STOP
+                else:
+                    action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
 
             if done or reaching_waypoint:
                 break
 
-            if self._env.sim._episode_step_count==499:
-                action = HabitatSimActions.STOP
+            # if self._env.sim._episode_step_count==500:
+            #     action = HabitatSimActions.STOP
 
             observation, reward, done, info = super().step({"action": action})
-
-            # print(self._env.sim._episode_step_count,action,self._env.task.is_stop_called,self._distance_target())
-
+            
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:
                     observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
