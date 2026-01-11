@@ -478,8 +478,11 @@ class MapNavEnv(habitat.RLEnv):
 
             max_turns = 4
             n_turns = 0
-
-            action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal,near_vis_ok=near_vis_ok)
+            if self._env.sim._episode_step_count==500:
+                action = HabitatSimActions.STOP
+            else:
+                action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+            # action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal,near_vis_ok=near_vis_ok)
             if action ==HabitatSimActions.STOP:
                 print(f"{id_name} final distance to goal: {np.linalg.norm(target_goal - agent_pose)}")
                 
@@ -513,7 +516,11 @@ class MapNavEnv(habitat.RLEnv):
                 if n_turns >= max_turns:
                     break
 
-                action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal,near_vis_ok=near_vis_ok)
+                if self._env.sim._episode_step_count==500:
+                    action = HabitatSimActions.STOP
+                else:
+                    action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+    
             # 如果 turn-loop 里已经 done 或 reaching_waypoint，就结束本次 interval
             if done or reaching_waypoint:
                 break

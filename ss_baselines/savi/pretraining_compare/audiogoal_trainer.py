@@ -136,10 +136,10 @@ class AudioGoalPredictorTrainer:
                         regressor_loss = torch.tensor([0], device=self.device)
                     elif self.predict_location:
                         regressor_loss = regressor_criterion(predicts_doa, theta_gt)+0.2*regressor_criterion(predicts_dis, dist_gt)
-                        classifier_loss = classifier_criterion(predicts_class, class_gt)
+                        classifier_loss = classifier_criterion(predicts_class, class_gt.long())
                     else:
                         raise ValueError('Must predict one item.')
-                    loss = classifier_loss + regressor_loss
+                    loss = 0.001*classifier_loss + regressor_loss
 
                     # backward + optimize only if in training phase
                     if split == 'train':

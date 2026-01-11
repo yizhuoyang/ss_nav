@@ -18,6 +18,8 @@ import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 sys.path.append("/media/kemove/data/av_nav/network/visual_infer")
+sys.path.append("/media/kemove/data/av_nav/network/av_map/")
+from clap_utils import *
 from yolo_heatmap import yolo_infer, mask_depth_to_binary_topdown, StreamingVisualMapFusion
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
 from prob_update_doa import StreamingSourceMapFusion, align_for_occ
@@ -487,10 +489,10 @@ class PPOTrainer(BaseRLTrainer):
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
 
-        # model_al = laion_clap.CLAP_Module(enable_fusion=False)
-        # model_al.load_ckpt() # download the default pretrained checkpoint.
-        # model_al.eval()
-        # print("Import the pretrained CLAP model successfully.")
+        model_al = laion_clap.CLAP_Module(enable_fusion=False)
+        model_al.load_ckpt() # download the default pretrained checkpoint.
+        model_al.eval()
+        print("Import the pretrained CLAP model successfully.")
         ############### Load SSL model and checkpoint ##################
 
         if CKPT_PATH is not None and os.path.exists(CKPT_PATH):
@@ -649,7 +651,7 @@ class PPOTrainer(BaseRLTrainer):
             map_size_m=map_size,
             res=0.1,
             sigma_Q_cells=0.0,
-            beta_r=0.2,
+            beta_r=0.8,
             r_max=30.0,
             intensity_zero_eps=0.0,
             out_dir="debug_plan/fusion_stream_debug",
@@ -663,8 +665,10 @@ class PPOTrainer(BaseRLTrainer):
             model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11m-seg.pt")
 
         # load pre-calculated embedding for audio-lang mapping
-        # id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
-        # text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").cuda()
+        id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
+        text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").to(self.device)
+        db_path = "/media/kemove/data/av_nav/data/audio_embeddings/audio_mean_1s.pt"
+
         total_exp   = 0
         success_exp = 0
 
@@ -690,8 +694,15 @@ class PPOTrainer(BaseRLTrainer):
                 refiner.reset(new_center_pose=current_position)
                 if use_visual:
                     vis_fuser.reset(new_center_pose=current_position)
-                    names = [object_class]
-                    model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                    names  = []
+                    scores = []
+                    seen = set()
+                    acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
+                    yolo_is_set = False
+                    best_name = None
+                    # audio_hist = AudioHistory5s(window_seconds=5.0, sr=16000)
+                    # names = [object_class]
+                    # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
@@ -699,27 +710,77 @@ class PPOTrainer(BaseRLTrainer):
             depth = depth.permute(2,0,1).to(self.device)      
             rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
             rgb     = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
+            waveform = observations[0]['audiogoal']  # (1,L)
+            waveform = waveform[:1,:]
+            # waveform = torch.from_numpy(int16_to_float32(float32_to_int16(waveform))).float().unsqueeze(0).to(self.device) # quantize before send it in to the model
+            audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
+
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
 
+            ## —————————— SOUND SOURCE LOCATION PREDICTION ———————————————————##
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
 
+
             if use_visual:
-                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                                                        max_depth_m=10.0,
-                                                        depth_is_normalized=True,
-                                                        grid_size=100,
-                                                        map_meters=10.0)
+                if audio_intensity <= 0:
+                    if yolo_is_set:
+                        mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                        heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                                max_depth_m=10.0,
+                                                                depth_is_normalized=True,
+                                                                grid_size=100,
+                                                                map_meters=10.0)
+                    else:
+                        heat_local = np.zeros((600,600),dtype=np.float32)
+                else:
+                    query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
+                    topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
+                    best_name, locked = acc.update(topk_objs)
+                    # print(best_name, locked,object_class)
+                    # 4) once locked, set yolo once
+                    if locked and (best_name is not None) and (not yolo_is_set):
+                        model_yolo.set_classes([best_name], model_yolo.get_text_pe([best_name]))
+                        yolo_is_set = True
+
+                    # 5) run yolo only after set
+                    if yolo_is_set:
+                        mask = yolo_infer(model_yolo, rgb/255, device="cuda", conf=0.1)
+                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                        heat_local = mask_depth_to_binary_topdown(
+                            depth[0].detach().cpu().numpy(),
+                            mask,
+                            hfov_deg=90,
+                            max_depth_m=10.0,
+                            depth_is_normalized=True,
+                            grid_size=100,
+                            map_meters=10.0
+                        )
+                    else:
+                         heat_local = np.zeros((600,600),dtype=np.float32)
+
+
+                # query_emb = embed_audio_whole_file(y, model=model, sr=16000, device="cuda")  # your function
+                # top3_objs = topk_most_similar_objects(query_emb, db_path, k=1)
+
+                # # print(names,object_class)
+                # # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                # mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                # mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                # heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                #                                         max_depth_m=10.0,
+                #                                         depth_is_normalized=True,
+                #                                         grid_size=100,
+                #                                         map_meters=10.0)
 
 
             agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
-            audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
+
             # print(audio_intensity)
             out = refiner.update_frame(
                 pred_theta=pred_doa,
