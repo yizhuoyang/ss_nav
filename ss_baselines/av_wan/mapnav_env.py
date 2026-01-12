@@ -145,11 +145,11 @@ class MapNavEnv(habitat.RLEnv):
 
             max_turns = 4
             n_turns = 0
-            if self._env.sim._episode_step_count==500:
+            if self._env.sim._episode_step_count==499:
                 action = HabitatSimActions.STOP
             else:
                 action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
-
+            # print(self._env.sim._episode_step_count,self._env.task.is_stop_called,action,self._episode_success(),self._env.sim.reaching_goal)
             while action in (HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT):
                 observation, reward, done, info = super().step({"action": action})
                 if len(self._config.VIDEO_OPTION) > 0:
@@ -177,10 +177,12 @@ class MapNavEnv(habitat.RLEnv):
                 if n_turns >= max_turns:
                     break
 
-                if self._env.sim._episode_step_count==500:
+                if self._env.sim._episode_step_count==499:
                     action = HabitatSimActions.STOP
                 else:
                     action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+
+                # print(self._env.sim._episode_step_count,self._env.task.is_stop_called,action,self._episode_success(),self._env.sim.reaching_goal)
 
             if done or reaching_waypoint:
                 break
@@ -189,7 +191,7 @@ class MapNavEnv(habitat.RLEnv):
             #     action = HabitatSimActions.STOP
 
             observation, reward, done, info = super().step({"action": action})
-            
+
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:
                     observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,

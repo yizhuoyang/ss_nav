@@ -643,6 +643,12 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
+        use_visual = False
+        save_vis   = False
+        if use_visual:
+            beta_r = 0.2
+        else:
+            beta_r = 0.2
 
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
@@ -651,15 +657,14 @@ class PPOTrainer(BaseRLTrainer):
             map_size_m=map_size,
             res=0.1,
             sigma_Q_cells=0.0,
-            beta_r=0.8,
+            beta_r=beta_r,
             r_max=30.0,
             intensity_zero_eps=0.0,
             out_dir="debug_plan/fusion_stream_debug",
             save_every=1,
         )
         # refiner.occ_mapper = self.envs.workers[0]._env.planner.mapper
-        use_visual = False
-        save_vis   = False
+
         if use_visual:
             vis_fuser = StreamingVisualMapFusion(map_size_m=map_size, res=0.1, use_logodds=False,out_dir="debug_plan/fusion_visual_debug",save_every=1,)
             model_yolo = YOLO("/media/kemove/data/av_nav/network/av_map/yoloe-11m-seg.pt")

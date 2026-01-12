@@ -282,8 +282,8 @@ def main():
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
         # load checkpoints
-        # ckpt = torch.load(os.path.join('/home/Disk/yyz/sound-spaces/data/models/savi_final_ipd/ckpt.5.pth'))
-        # audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
+        ckpt = torch.load(os.path.join('/home/Disk/yyz/sound-spaces/data/models/savi_final_ipd/ckpt.5.pth'))
+        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
         # load checkpoints
         audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:
