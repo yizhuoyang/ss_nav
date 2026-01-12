@@ -532,14 +532,14 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
         config.freeze()
-        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-        #     config.defrost()
-        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        #     config.freeze()
+        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:/
+            # config.defrost()
+            # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            # config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
@@ -582,6 +582,7 @@ class PPOTrainer(BaseRLTrainer):
 
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
+            # observation_space.spaces['depth'].shape = (128, 128, 1)
             # observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
             # observation_space.spaces['rgb'].shape = (model_resolution, model_resolution, 3)
         else:
@@ -604,6 +605,11 @@ class PPOTrainer(BaseRLTrainer):
 
         # if self.config.DISPLAY_RESOLUTION != model_resolution:
         #     resize_observation(observations, model_resolution)
+        # TODO YYZ
+        # observations['depth'] = np.expand_dims(cv2.resize(observations['depth'], (128, 128)),
+                                        # axis=-1)
+
+
         batch = batch_obs(observations, self.device)
         # print("before:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
         current_episode_reward = torch.zeros(
@@ -643,8 +649,8 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = False
-        save_vis   = False
+        use_visual = True
+        save_vis   = True
         if use_visual:
             beta_r = 0.2
         else:
@@ -702,17 +708,19 @@ class PPOTrainer(BaseRLTrainer):
                     names  = []
                     scores = []
                     seen = set()
-                    acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
-                    yolo_is_set = False
-                    best_name = None
+                    # acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
+                    # yolo_is_set = False
+                    # best_name = None
                     # audio_hist = AudioHistory5s(window_seconds=5.0, sr=16000)
-                    # names = [object_class]
-                    # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                    names = [object_class]
+                    model_yolo.set_classes(names, model_yolo.get_text_pe(names))
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
-            depth = depth.permute(2,0,1).to(self.device)      
+            depth = observations[0]["depth"]
+            depth = cv2.resize(depth, (128, 128))
+            depth = torch.as_tensor(depth).float()
+            depth = depth.unsqueeze(0).to(self.device)      
             rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
             rgb     = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
             waveform = observations[0]['audiogoal']  # (1,L)
@@ -732,57 +740,13 @@ class PPOTrainer(BaseRLTrainer):
 
 
             if use_visual:
-                if audio_intensity <= 0:
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                                                                max_depth_m=10.0,
-                                                                depth_is_normalized=True,
-                                                                grid_size=100,
-                                                                map_meters=10.0)
-                    else:
-                        heat_local = np.zeros((600,600),dtype=np.float32)
-                else:
-                    query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
-                    topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
-                    best_name, locked = acc.update(topk_objs)
-                    # print(best_name, locked,object_class)
-                    # 4) once locked, set yolo once
-                    if locked and (best_name is not None) and (not yolo_is_set):
-                        model_yolo.set_classes([best_name], model_yolo.get_text_pe([best_name]))
-                        yolo_is_set = True
-
-                    # 5) run yolo only after set
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo, rgb/255, device="cuda", conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(
-                            depth[0].detach().cpu().numpy(),
-                            mask,
-                            hfov_deg=90,
-                            max_depth_m=10.0,
-                            depth_is_normalized=True,
-                            grid_size=100,
-                            map_meters=10.0
-                        )
-                    else:
-                         heat_local = np.zeros((600,600),dtype=np.float32)
-
-
-                # query_emb = embed_audio_whole_file(y, model=model, sr=16000, device="cuda")  # your function
-                # top3_objs = topk_most_similar_objects(query_emb, db_path, k=1)
-
-                # # print(names,object_class)
-                # # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
-                # mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                # mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                # heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                #                                         max_depth_m=10.0,
-                #                                         depth_is_normalized=True,
-                #                                         grid_size=100,
-                #                                         map_meters=10.0)
-
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                        max_depth_m=10.0,
+                                                        depth_is_normalized=True,
+                                                        grid_size=100,
+                                                        map_meters=10.0)
 
             agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
 
@@ -841,10 +805,11 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            # if pose_all[-1]>=295:
-                # print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
-            # if config.DISPLAY_RESOLUTION != model_resolution:
-            #     resize_observation(observations, model_resolution)
+
+            # observations['depth'] = np.expand_dims(cv2.resize(observations['depth'], (128, 128)),
+                                            # axis=-1)
+
+
 
             batch = batch_obs(observations, self.device)
             if len(self.config.VIDEO_OPTION) > 0:

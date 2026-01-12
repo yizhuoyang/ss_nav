@@ -68,7 +68,7 @@ class Planner:
         self._last_collided = False
         self._block_forward_steps = 0
 
-        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan"
+        self._debug_dir = "/home/Disk/yyz/sound-spaces/debug_plan_vis_test"
         os.makedirs(self._debug_dir, exist_ok=True)
         self._debug_step = 0
         self._debug_every = 1  # 每步都画；想降低开销可设 5/10
@@ -584,6 +584,108 @@ class Planner:
             # 共线：在正前或正后。用 bias 防抖
             return getattr(self, "_turn_bias", HabitatSimActions.TURN_LEFT)
 
+    # def _plot_plan_debug(
+    #     self,
+    #     geometric_map,
+    #     cur_xy,
+    #     goal_xy,
+    #     goal_snap_xy,
+    #     inter_xy,
+    #     path_nodes,
+    #     orientation,
+    #     save_prefix="plan",
+    # ):
+    #     H, W, _ = geometric_map.shape
+
+    #     obs = geometric_map[:, :, 0] > 0.5   # obstacle
+    #     exp = geometric_map[:, :, 1] > 0.5   # explored
+
+    #     # ===== 背景 RGB 图（固定颜色）=====
+    #     bg = np.zeros((H, W, 3), dtype=np.uint8)
+    #     bg[:, :, :] = 60  # 未探索：深灰
+    #     bg[exp & (~obs)] = np.array([255, 255, 255], dtype=np.uint8)  # explored free
+    #     bg[exp & (obs)]  = np.array([0, 0, 0], dtype=np.uint8)        # explored obstacle
+
+    #     # ===== path nodes -> (x,y) =====
+    #     path_xy = []
+    #     if path_nodes is not None and len(path_nodes) > 0:
+    #         for n in path_nodes:
+    #             if n in self._graph:
+    #                 path_xy.append(self._graph.nodes[n]["map_index"])  # (x,y)
+
+    #     fig = plt.figure(figsize=(8, 8))
+    #     plt.imshow(bg, origin="upper")
+    #     plt.title(f"{save_prefix} step={self._debug_step}")
+
+    #     # ===== 最短路径：蓝色折线 =====
+    #     if len(path_xy) >= 2:
+    #         xs = [p[0] for p in path_xy]
+    #         ys = [p[1] for p in path_xy]
+    #         plt.plot(xs, ys, linewidth=2.5, color="dodgerblue", alpha=0.95,
+    #                  label=f"shortest path (len={len(path_xy)})")
+
+    #     # ===== Agent：红圆点 =====
+    #     cx, cy = cur_xy
+    #     plt.scatter([cx], [cy], s=90, c="red", marker="o",
+    #                 edgecolors="white", linewidths=1.0,
+    #                 label=f"agent (x,y)=({cx},{cy})  ori={int(orientation)}°")
+
+    #     # ===== 朝向箭头：黄色 =====
+    #     theta = np.deg2rad(orientation)
+    #     dx = np.cos(theta)
+    #     dy = np.sin(theta)
+
+    #     arrow_len = max(3, int(self.mapper._stride * 0.8))
+    #     ax = dx * arrow_len
+    #     ay = dy * arrow_len
+
+    #     plt.arrow(
+    #         cx, cy, ax, ay,
+    #         head_width=6,
+    #         head_length=8,
+    #         fc="yellow",
+    #         ec="yellow",
+    #         linewidth=2.0,
+    #         length_includes_head=True,
+    #         alpha=0.95
+    #     )
+
+    #     # ===== Goal (snapped)：绿叉 =====
+    #     if goal_snap_xy is not None:
+    #         gx, gy = goal_snap_xy
+    #         plt.scatter([gx], [gy], s=120, c="limegreen", marker="x",
+    #                     linewidths=2.5,
+    #                     label=f"goal(snap) (x,y)=({gx},{gy})")
+
+    #     # ===== Intermediate：橙三角 =====
+    #     if inter_xy is not None:
+    #         ix, iy = inter_xy
+    #         plt.scatter([ix], [iy], s=120, c="orange", marker="^",
+    #                     edgecolors="black", linewidths=0.8,
+    #                     label=f"intermediate (x,y)=({ix},{iy})")
+
+    #     # ===== Raw goal：紫加号（可选）=====
+    #     if goal_xy is not None:
+    #         rgx, rgy = int(goal_xy[0]), int(goal_xy[1])
+    #         if 0 <= rgx < W and 0 <= rgy < H:
+    #             plt.scatter([rgx], [rgy], s=80, c="magenta", marker="+",
+    #                         linewidths=2.0,
+    #                         label=f"goal(raw) (x,y)=({rgx},{rgy})")
+
+    #     plt.xlim([0, W - 1])
+    #     plt.ylim([H - 1, 0])
+
+    #     # 让 legend 更紧凑一点
+    #     plt.legend(loc="lower right", fontsize=9, framealpha=0.85)
+    #     plt.tight_layout()
+
+    #     out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:03d}.png")
+    #     plt.savefig(out_png, dpi=150)
+    #     plt.close(fig)
+
+        # out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
+        # np.save(out_np, np.array(path_xy, dtype=np.int32))
+
     def _plot_plan_debug(
         self,
         geometric_map,
@@ -600,91 +702,54 @@ class Planner:
         obs = geometric_map[:, :, 0] > 0.5   # obstacle
         exp = geometric_map[:, :, 1] > 0.5   # explored
 
-        # ===== 背景 RGB 图（固定颜色）=====
+        # ===== 背景 RGB 图（按你的配色）=====
+        # unexplored: white, free: gray, obstacle: green
         bg = np.zeros((H, W, 3), dtype=np.uint8)
-        bg[:, :, :] = 60  # 未探索：深灰
-        bg[exp & (~obs)] = np.array([255, 255, 255], dtype=np.uint8)  # explored free
-        bg[exp & (obs)]  = np.array([0, 0, 0], dtype=np.uint8)        # explored obstacle
+        bg[:, :, :] = 255  # unexplored = white
 
-        # ===== path nodes -> (x,y) =====
-        path_xy = []
-        if path_nodes is not None and len(path_nodes) > 0:
-            for n in path_nodes:
-                if n in self._graph:
-                    path_xy.append(self._graph.nodes[n]["map_index"])  # (x,y)
+        free = exp & (~obs)
+        bg[free] = np.array([160, 160, 160], dtype=np.uint8)   # explored free = gray
+
+        bg[obs]  = np.array([0, 200, 0], dtype=np.uint8)       # obstacle = green
 
         fig = plt.figure(figsize=(8, 8))
         plt.imshow(bg, origin="upper")
-        plt.title(f"{save_prefix} step={self._debug_step}")
-
-        # ===== 最短路径：蓝色折线 =====
-        if len(path_xy) >= 2:
-            xs = [p[0] for p in path_xy]
-            ys = [p[1] for p in path_xy]
-            plt.plot(xs, ys, linewidth=2.5, color="dodgerblue", alpha=0.95,
-                     label=f"shortest path (len={len(path_xy)})")
 
         # ===== Agent：红圆点 =====
-        cx, cy = cur_xy
-        plt.scatter([cx], [cy], s=90, c="red", marker="o",
-                    edgecolors="white", linewidths=1.0,
-                    label=f"agent (x,y)=({cx},{cy})  ori={int(orientation)}°")
+        # cx, cy = cur_xy
+        # plt.scatter([cx], [cy], s=90, c="red", marker="o",
+        #             edgecolors="white", linewidths=1.0)
 
-        # ===== 朝向箭头：黄色 =====
-        theta = np.deg2rad(orientation)
-        dx = np.cos(theta)
-        dy = np.sin(theta)
+        # # ===== 朝向箭头：黄色 =====
+        # theta = np.deg2rad(orientation)
+        # dx = np.cos(theta)
+        # dy = np.sin(theta)
 
-        arrow_len = max(3, int(self.mapper._stride * 0.8))
-        ax = dx * arrow_len
-        ay = dy * arrow_len
+        # arrow_len = max(3, int(self.mapper._stride * 0.8))
+        # ax = dx * arrow_len
+        # ay = dy * arrow_len
 
-        plt.arrow(
-            cx, cy, ax, ay,
-            head_width=6,
-            head_length=8,
-            fc="yellow",
-            ec="yellow",
-            linewidth=2.0,
-            length_includes_head=True,
-            alpha=0.95
-        )
+        # plt.arrow(
+        #     cx, cy, ax, ay,
+        #     head_width=6,
+        #     head_length=8,
+        #     fc="yellow",
+        #     ec="yellow",
+        #     linewidth=2.0,
+        #     length_includes_head=True,
+        #     alpha=0.95
+        # )
 
-        # ===== Goal (snapped)：绿叉 =====
-        if goal_snap_xy is not None:
-            gx, gy = goal_snap_xy
-            plt.scatter([gx], [gy], s=120, c="limegreen", marker="x",
-                        linewidths=2.5,
-                        label=f"goal(snap) (x,y)=({gx},{gy})")
-
-        # ===== Intermediate：橙三角 =====
-        if inter_xy is not None:
-            ix, iy = inter_xy
-            plt.scatter([ix], [iy], s=120, c="orange", marker="^",
-                        edgecolors="black", linewidths=0.8,
-                        label=f"intermediate (x,y)=({ix},{iy})")
-
-        # ===== Raw goal：紫加号（可选）=====
-        if goal_xy is not None:
-            rgx, rgy = int(goal_xy[0]), int(goal_xy[1])
-            if 0 <= rgx < W and 0 <= rgy < H:
-                plt.scatter([rgx], [rgy], s=80, c="magenta", marker="+",
-                            linewidths=2.0,
-                            label=f"goal(raw) (x,y)=({rgx},{rgy})")
-
+        # ===== 只保留画面（不画路径/中点/目标/legend/title）=====
+        plt.axis("off")
         plt.xlim([0, W - 1])
         plt.ylim([H - 1, 0])
-
-        # 让 legend 更紧凑一点
-        plt.legend(loc="lower right", fontsize=9, framealpha=0.85)
-        plt.tight_layout()
+        plt.tight_layout(pad=0)
 
         out_png = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:03d}.png")
-        plt.savefig(out_png, dpi=150)
+        plt.savefig(out_png, dpi=150, bbox_inches="tight", pad_inches=0)
         plt.close(fig)
 
-        # out_np = os.path.join(self._debug_dir, f"{save_prefix}_{self._debug_step:06d}_path.npy")
-        # np.save(out_np, np.array(path_xy, dtype=np.int32))
 
 
     def _pick_frontier_node(self, geometric_map, cur_node, goal_xy, max_samples=3000, step=4,
