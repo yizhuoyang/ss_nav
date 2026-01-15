@@ -18,3 +18,4 @@ my_script
 *.ts
 *.pt
 vis_results.py
+/topdown_pngs

@@ -24,8 +24,6 @@ from yolo_heatmap import yolo_infer, mask_depth_to_binary_topdown, StreamingVisu
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
 from prob_update_doa import StreamingSourceMapFusion, align_for_occ
 from ssl_net_infer import SSLNet,SSLNet_DOA,SSLNet_depth_DOA
-# from ss_baselines.savi.pretraining_compare.audiogoal_predictor import AudioGoalPredictor_infer
-from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPredictor_infer
 from ultralytics import YOLO
 import numpy as np
 import torch
@@ -52,7 +50,12 @@ from ss_baselines.av_wan.ppo import AudioNavBaselinePolicy
 from ss_baselines.av_wan.ppo import PPO
 
 
-
+def normalize_depth(depth):
+    min_depth = 0
+    max_depth = 10
+    depth = np.clip(depth, min_depth, max_depth)
+    normalized_depth = (depth - min_depth) / (max_depth - min_depth)
+    return normalized_depth
 
 @baseline_registry.register_trainer(name="AVWanTrainer")
 class PPOTrainer(BaseRLTrainer):
@@ -486,21 +489,10 @@ class PPOTrainer(BaseRLTrainer):
 
         ############### Load SSL model and checkpoint ##################
         CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
-        # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_ral/laset_epoch.pth"
-        # model = AudioGoalPredictor_infer(predict_label=False,
-                                                    #   predict_location=True).to(device=self.device)  
         model = SSLNet_depth_DOA(use_compress=False).to(self.device)
 
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
-
-        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
-
-         
-        # ckpt = torch.load(os.path.join('/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'))
-        # audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
 
         model_al = laion_clap.CLAP_Module(enable_fusion=False)
         model_al.load_ckpt() # download the default pretrained checkpoint.
@@ -545,14 +537,14 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
         config.freeze()
-        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-        #     config.defrost()
-        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-        #     config.freeze()
+        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:/
+            # config.defrost()
+            # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+            # config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
@@ -595,6 +587,7 @@ class PPOTrainer(BaseRLTrainer):
 
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
+            # observation_space.spaces['depth'].shape = (128, 128, 1)
             # observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
             # observation_space.spaces['rgb'].shape = (model_resolution, model_resolution, 3)
         else:
@@ -617,6 +610,11 @@ class PPOTrainer(BaseRLTrainer):
 
         # if self.config.DISPLAY_RESOLUTION != model_resolution:
         #     resize_observation(observations, model_resolution)
+        # TODO YYZ
+        # observations['depth'] = np.expand_dims(cv2.resize(observations['depth'], (128, 128)),
+                                        # axis=-1)
+
+
         batch = batch_obs(observations, self.device)
         # print("before:",observations[0]["depth"].max(),observations[0]["depth"].min(),observations[0]["rgb"].shape)
         current_episode_reward = torch.zeros(
@@ -715,17 +713,21 @@ class PPOTrainer(BaseRLTrainer):
                     names  = []
                     scores = []
                     seen = set()
-                    acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
-                    yolo_is_set = False
-                    best_name = None
+                    # acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
+                    # yolo_is_set = False
+                    # best_name = None
                     # audio_hist = AudioHistory5s(window_seconds=5.0, sr=16000)
-                    # names = [object_class]
-                    # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                    names = [object_class]
+                    model_yolo.set_classes(names, model_yolo.get_text_pe(names))
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
-            depth = depth.permute(2,0,1).to(self.device)      
+            depth = observations[0]["depth"]
+            # print(depth.shape)
+            depth = cv2.resize(depth, (128, 128))
+            depth = normalize_depth(depth)
+            depth = torch.as_tensor(depth).float()
+            depth = depth.unsqueeze(0).to(self.device)      
             rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
             rgb     = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
             waveform = observations[0]['audiogoal']  # (1,L)
@@ -743,59 +745,17 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
 
+            oracle_actions = sim.compute_oracle_actions_with_goal(sim._position_to_index(sim.get_agent_state().position),sim._position_to_index(source_loc))
+            short_actions = oracle_actions
 
             if use_visual:
-                if audio_intensity <= 0:
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                                                                max_depth_m=10.0,
-                                                                depth_is_normalized=True,
-                                                                grid_size=100,
-                                                                map_meters=10.0)
-                    else:
-                        heat_local = np.zeros((600,600),dtype=np.float32)
-                else:
-                    query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
-                    topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
-                    best_name, locked = acc.update(topk_objs)
-                    # print(best_name, locked,object_class)
-                    # 4) once locked, set yolo once
-                    if locked and (best_name is not None) and (not yolo_is_set):
-                        model_yolo.set_classes([best_name], model_yolo.get_text_pe([best_name]))
-                        yolo_is_set = True
-
-                    # 5) run yolo only after set
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo, rgb/255, device="cuda", conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(
-                            depth[0].detach().cpu().numpy(),
-                            mask,
-                            hfov_deg=90,
-                            max_depth_m=10.0,
-                            depth_is_normalized=True,
-                            grid_size=100,
-                            map_meters=10.0
-                        )
-                    else:
-                         heat_local = np.zeros((600,600),dtype=np.float32)
-
-
-                # query_emb = embed_audio_whole_file(y, model=model, sr=16000, device="cuda")  # your function
-                # top3_objs = topk_most_similar_objects(query_emb, db_path, k=1)
-
-                # # print(names,object_class)
-                # # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
-                # mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                # mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                # heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                #                                         max_depth_m=10.0,
-                #                                         depth_is_normalized=True,
-                #                                         grid_size=100,
-                #                                         map_meters=10.0)
-
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                        max_depth_m=10.0,
+                                                        depth_is_normalized=True,
+                                                        grid_size=100,
+                                                        map_meters=10.0)
 
             agent_x, agent_z, heading = current_position[0], current_position[2], quaternion_to_heading_y(current_rotation.w,current_rotation.x,current_rotation.y,current_rotation.z)
 
@@ -823,7 +783,7 @@ class PPOTrainer(BaseRLTrainer):
 
             if use_visual:
                 data = {
-                    "action": np.array([max_x_world,max_z_world]),
+                    "action": short_actions,
                     "refiner": refiner,
                     "vis_fuser": vis_fuser,
                     "target_goal": np.array([source_loc[0],source_loc[-1]]),
@@ -836,7 +796,7 @@ class PPOTrainer(BaseRLTrainer):
                 }
             else:
                 data = {
-                "action": np.array([max_x_world,max_z_world]),
+                "action": short_actions,
                 "vis_fuser": None,
                 "refiner": refiner,
                 "target_goal": np.array([source_loc[0],source_loc[-1]]),
@@ -854,18 +814,33 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz_ours"
+            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz"
             save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
             os.makedirs(save_dir, exist_ok=True)
+            td = infos[0]["top_down_map"]
+            H, W = td["map"].shape[:2]
+
+            bounds = sim.pathfinder.get_bounds()
+            (minx, miny, minz), (maxx, maxy, maxz) = bounds
+            mpp_x = (maxx - minx) / float(W)
+            mpp_z = (maxz - minz) / float(H)
+
             np.savez_compressed(
                 os.path.join(save_dir, f"{pose_all[-1]}.npz"),
-                agent_pos=np.array([current_position[0],current_position[-1]])
+                map=td["map"],
+                fog_of_war_mask=td["fog_of_war_mask"],
+                agent_map_coord=np.array(td["agent_map_coord"], dtype=np.int32),
+                agent_angle=np.array(td["agent_angle"], dtype=np.float32),
+                agent_pos=np.array([current_position[0],current_position[-1]]),
+                bounds=np.array(bounds, dtype=np.float32),     # (2,3)
+                map_shape=np.array([H, W], dtype=np.int32),
+                meters_per_pixel_x=np.array(mpp_x, dtype=np.float32),
+                meters_per_pixel_z=np.array(mpp_z, dtype=np.float32),
             )
-            # obser
-            # if pose_all[-1]>=295:
-                # print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
-            # if config.DISPLAY_RESOLUTION != model_resolution:
-            #     resize_observation(observations, model_resolution)
+            # observations['depth'] = np.expand_dims(cv2.resize(observations['depth'], (128, 128)),
+                                            # axis=-1)
+
+
 
             batch = batch_obs(observations, self.device)
             if len(self.config.VIDEO_OPTION) > 0:

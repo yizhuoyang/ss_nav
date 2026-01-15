@@ -50,7 +50,12 @@ from ss_baselines.av_wan.ppo import AudioNavBaselinePolicy
 from ss_baselines.av_wan.ppo import PPO
 
 
-
+def normalize_depth(depth):
+    min_depth = 0
+    max_depth = 10
+    depth = np.clip(depth, min_depth, max_depth)
+    normalized_depth = (depth - min_depth) / (max_depth - min_depth)
+    return normalized_depth
 
 @baseline_registry.register_trainer(name="AVWanTrainer")
 class PPOTrainer(BaseRLTrainer):
@@ -649,8 +654,8 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = True
-        save_vis   = True
+        use_visual = False
+        save_vis   = False
         if use_visual:
             beta_r = 0.2
         else:
@@ -718,7 +723,9 @@ class PPOTrainer(BaseRLTrainer):
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
             depth = observations[0]["depth"]
-            depth = cv2.resize(depth, (128, 128))
+            # depth = cv2.resize(depth, (128, 128))
+            depth = normalize_depth(depth)
+            print(depth.max(),depth.min())
             depth = torch.as_tensor(depth).float()
             depth = depth.unsqueeze(0).to(self.device)      
             rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
@@ -805,7 +812,7 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-
+            # print(infos)
             # observations['depth'] = np.expand_dims(cv2.resize(observations['depth'], (128, 128)),
                                             # axis=-1)
 

@@ -25,7 +25,7 @@ class AudioGoalPredictorTrainer:
     def __init__(self, config, model_dir, predict_label, predict_location):
         self.config = config
         self.model_dir = model_dir
-        self.device = (torch.device("cuda", 0))
+        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
         self.batch_size = 1024
         self.num_worker = 8
@@ -36,7 +36,7 @@ class AudioGoalPredictorTrainer:
                                                       predict_location=predict_location).to(device=self.device)                              
         self.predict_label = predict_label
         self.predict_location = predict_location
-        summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda')
+        # summary(self.audiogoal_predictor.spec_encoder, (2, 257, 101), device='cuda')
 
     def run(self, splits, writer=None):
         meta_dir = self.config.TASK_CONFIG.SIMULATOR.AUDIO.METADATA_DIR
@@ -282,8 +282,8 @@ def main():
     if args.run_type == 'train':
         writer = SummaryWriter(log_dir=log_dir)
         # load checkpoints
-        ckpt = torch.load(os.path.join('/home/Disk/yyz/sound-spaces/data/models/savi_final_ipd/ckpt.5.pth'))
-        audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
+        # ckpt = torch.load(os.path.join('/home/Disk/yyz/sound-spaces/data/models/savi_final_ipd/ckpt.5.pth'))
+        # audiogoal_predictor_trainer.audiogoal_predictor.load_state_dict(ckpt['audiogoal_predictor'], strict=False)
         # load checkpoints
         audiogoal_predictor_trainer.run(['train', 'val'], writer)
     else:

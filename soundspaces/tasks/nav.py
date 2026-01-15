@@ -408,7 +408,7 @@ class EgoMap(Sensor):
         else:
             depth = sim_depth
             #TODO
-        # depth = depth*10
+        depth = depth*10
         XYZ_ego = self.convert_to_pointcloud(depth)
 
         # Adding agent's height to the point cloud
