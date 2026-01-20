@@ -17,6 +17,8 @@ python ss_baselines/av_wan/run.py --run-type eval --exp-config ss_baselines/av_w
 python ss_baselines/av_wan/run.py --run-type eval --exp-config ss_baselines/av_wan/config/audionav/replica/test_with_am.yaml EVAL_CKPT_PATH_DIR data/pretrained_weights/audionav/av_wan/replica/unheard.pth EVAL.SPLIT test_multiple_unheard 
 ```
 
+ python ss_baselines/av_wan/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_wan/config/semantic_audionav/mp3d/rgbd_ddppo.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_wan/mp3d/heard.pth TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS True TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"EGOMAP_SENSOR\",\"COLLISION\",\"POSE_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] TEST_EPISODE_COUNT 1000 EVAL.SPLIT test_distractor
+
 
 ## Citation
 If you use this model in your research, please cite the following paper:

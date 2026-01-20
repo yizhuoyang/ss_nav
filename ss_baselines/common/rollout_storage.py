@@ -86,6 +86,9 @@ class RolloutStorage:
         masks,
     ):
         for sensor in observations:
+            # print('observations[sensor].shape:', observations[sensor].shape)
+            # if sensor == 'depth':
+            #     observations[sensor] = observations[sensor].squeeze(-1)
             self.observations[sensor][self.step + 1].copy_(
                 observations[sensor]
             )

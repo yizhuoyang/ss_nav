@@ -165,7 +165,6 @@ class DDPPOTrainer(PPOTrainer):
 
         observations = self.envs.reset()
         batch = batch_obs(observations, device=self.device)
-
         obs_space = self.envs.observation_spaces[0]
 
         rollouts = RolloutStorage(
@@ -178,8 +177,11 @@ class DDPPOTrainer(PPOTrainer):
         )
         rollouts.to(self.device)
 
-        for sensor in rollouts.observations:
-            rollouts.observations[sensor][0].copy_(batch[sensor])
+
+        # for sensor in rollouts.observations:
+        #     if sensor == 'depth':
+        #         batch[sensor] = batch[sensor].squeeze(-1)
+        #     rollouts.observations[sensor][0].copy_(batch[sensor])
 
         # batch and observations may contain shared PyTorch CUDA
         # tensors.  We must explicitly clear them here otherwise

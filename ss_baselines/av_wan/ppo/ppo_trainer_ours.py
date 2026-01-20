@@ -487,9 +487,12 @@ class PPOTrainer(BaseRLTrainer):
         ############### Load SSL model and checkpoint ##################
         CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
+        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'
+        # CKPT_PATH = 'comparison/sound-spaces/data/models/savi_ours_noise_tune/laset_epoch.pth'
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_ral/laset_epoch.pth"
-        # model = AudioGoalPredictor_infer(predict_label=False,
-                                                    #   predict_location=True).to(device=self.device)  
+        # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth"
+        # model     = AudioGoalPredictor_infer(predict_label=False,
+        #                                               predict_location=True).to(device=self.device)  
         model = SSLNet_depth_DOA(use_compress=False).to(self.device)
 
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
@@ -656,7 +659,7 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = False
+        use_visual = True
         save_vis   = False
         if use_visual:
             beta_r = 0.2
@@ -732,6 +735,7 @@ class PPOTrainer(BaseRLTrainer):
             waveform = waveform[:1,:]
             # waveform = torch.from_numpy(int16_to_float32(float32_to_int16(waveform))).float().unsqueeze(0).to(self.device) # quantize before send it in to the model
             audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
+            # print(audio_intensity)
 
             state = sim.get_agent_state()
             current_position = state.position
@@ -742,7 +746,6 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
-
 
             if use_visual:
                 if audio_intensity <= 0:
@@ -854,13 +857,13 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz_ours"
-            save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
-            os.makedirs(save_dir, exist_ok=True)
-            np.savez_compressed(
-                os.path.join(save_dir, f"{pose_all[-1]}.npz"),
-                agent_pos=np.array([current_position[0],current_position[-1]])
-            )
+            # save_dir = "/home/Disk/yyz/sound-spaces/debug_npz_ours"
+            # save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
+            # os.makedirs(save_dir, exist_ok=True)
+            # np.savez_compressed(
+            #     os.path.join(save_dir, f"{pose_all[-1]}.npz"),
+            #     agent_pos=np.array([current_position[0],current_position[-1]])
+            # )
             # obser
             # if pose_all[-1]>=295:
                 # print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")

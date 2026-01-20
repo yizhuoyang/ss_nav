@@ -19,3 +19,5 @@ my_script
 *.pt
 vis_results.py
 /topdown_pngs
+/vis
+/comparison
