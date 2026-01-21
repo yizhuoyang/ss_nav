@@ -76,7 +76,6 @@ class SpectrogramSensor(Sensor):
     def _get_observation_space(self, *args: Any, **kwargs: Any):
         # spectrogram = self.compute_spectrogram(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
         spectrogram = self.compute_stft_phase_features(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
-
         return spaces.Box(
             low=np.finfo(np.float32).min,
             high=np.finfo(np.float32).max,
@@ -409,6 +408,7 @@ class EgoMap(Sensor):
             depth = sim_depth
             #TODO
         depth = depth*10
+        # print(depth.max(), depth.min())
         XYZ_ego = self.convert_to_pointcloud(depth)
 
         # Adding agent's height to the point cloud

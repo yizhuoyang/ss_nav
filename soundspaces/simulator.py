@@ -624,7 +624,19 @@ class SoundSpacesSim(Simulator, ABC):
                     logging.debug("Empty RIR file at {}".format(binaural_rir_file))
                     binaural_rir = np.zeros((sampling_rate, 2)).astype(np.float32)
             else:
-                binaural_rir = np.transpose(np.array(self._sim.get_sensor_observations()["audio_sensor"]))
+                # binaural_rir = np.transpose(np.array(self._sim.get_sensor_observations()["audio_sensor"]))
+                binaural_rir_file = os.path.join(self.binaural_rir_dir, str(self.azimuth_angle), '{}_{}.wav'.format(
+                    self._receiver_position_index, self._source_position_index))
+                try:
+                    sampling_freq, binaural_rir = wavfile.read(binaural_rir_file)  # float32
+                except ValueError:
+                    logging.warning("{} file is not readable".format(binaural_rir_file))
+                    binaural_rir = np.zeros((sampling_rate, 2)).astype(np.float32)
+                if len(binaural_rir) == 0:
+                    logging.debug("Empty RIR file at {}".format(binaural_rir_file))
+                    binaural_rir = np.zeros((sampling_rate, 2)).astype(np.float32)
+
+
 
             # by default, convolve in full mode, which preserves the direct sound
             if self.current_source_sound.shape[0] == sampling_rate:
@@ -664,7 +676,7 @@ class SoundSpacesSim(Simulator, ABC):
                                                              ) for channel in range(distractor_rir.shape[-1])])
 
                 distractor_seg = distractor_convolved[:, :sampling_rate].astype(np.float32)
-                snr_db = 50
+                snr_db = 0
                 sig = audiogoal[:, :sampling_rate].astype(np.float32)
 
                 eps = 1e-12

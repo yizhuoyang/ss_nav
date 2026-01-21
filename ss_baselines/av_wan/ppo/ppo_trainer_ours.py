@@ -485,15 +485,15 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
+        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'
         # CKPT_PATH = 'comparison/sound-spaces/data/models/savi_ours_noise_tune/laset_epoch.pth'
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_ral/laset_epoch.pth"
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth"
-        model     = AudioGoalPredictor_infer(predict_label=False,
-                                                      predict_location=True).to(device=self.device)  
-        # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+        # model     = AudioGoalPredictor_infer(predict_label=False,
+                                                    #   predict_location=True).to(device=self.device)  
+        model = SSLNet_depth_DOA(use_compress=False).to(self.device)
 
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
@@ -727,21 +727,27 @@ class PPOTrainer(BaseRLTrainer):
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
-            depth = depth.permute(2,0,1).to(self.device)      
-            rgb   = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
-            rgb     = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
+            # depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
+            # depth = depth.permute(2,0,1).to(self.device)      
+            depth = observations[0]["depth"][:,:,0]/10
+            depth = cv2.resize(depth,(128,128),interpolation=cv2.INTER_NEAREST)
+            depth = torch.as_tensor(depth).float().unsqueeze(-1)
+            depth = depth.permute(2,0,1).to(self.device)
+
+            rgb      = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
+            rgb      = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
             waveform = observations[0]['audiogoal']  # (1,L)
             waveform = waveform[:1,:]
             # waveform = torch.from_numpy(int16_to_float32(float32_to_int16(waveform))).float().unsqueeze(0).to(self.device) # quantize before send it in to the model
             audio_intensity = np.mean(np.abs(observations[0]['audiogoal']))
             # print(audio_intensity)
 
+
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-
+            # print(current_position,current_rotation)
             ## —————————— SOUND SOURCE LOCATION PREDICTION ———————————————————##
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
