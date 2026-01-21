@@ -118,7 +118,7 @@ class MapNavEnv(habitat.RLEnv):
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
             else:
-                fused = ((vis_map + 1e-6)*0.4 + 0.6*(sound_map_gaussian + 1e-6))
+                fused = ((vis_map + 1e-6)*0.2 + 0.8*(sound_map_gaussian + 1e-6))
                 refiner.P          = fused
         else:
             refiner.P          = sound_map

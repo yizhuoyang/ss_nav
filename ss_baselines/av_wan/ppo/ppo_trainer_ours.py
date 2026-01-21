@@ -485,15 +485,15 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
-        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
+        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'
         # CKPT_PATH = 'comparison/sound-spaces/data/models/savi_ours_noise_tune/laset_epoch.pth'
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_ral/laset_epoch.pth"
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth"
-        # model     = AudioGoalPredictor_infer(predict_label=False,
-        #                                               predict_location=True).to(device=self.device)  
-        model = SSLNet_depth_DOA(use_compress=False).to(self.device)
+        model     = AudioGoalPredictor_infer(predict_label=False,
+                                                      predict_location=True).to(device=self.device)  
+        # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
 
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
@@ -557,7 +557,7 @@ class PPOTrainer(BaseRLTrainer):
         #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         #     config.freeze()
 
-        logger.info(f"env config: {config}")
+        # logger.info(f"env config: {config}")
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
@@ -659,7 +659,7 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = True
+        use_visual = False
         save_vis   = False
         if use_visual:
             beta_r = 0.2
@@ -857,6 +857,8 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
+            ###########3 Save the final position for vis################
+
             # save_dir = "/home/Disk/yyz/sound-spaces/debug_npz_ours"
             # save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
             # os.makedirs(save_dir, exist_ok=True)
@@ -865,6 +867,7 @@ class PPOTrainer(BaseRLTrainer):
             #     agent_pos=np.array([current_position[0],current_position[-1]])
             # )
             # obser
+
             # if pose_all[-1]>=295:
                 # print(f"{scene_name}_{episode_id}_{object_class} final distance to goal: {np.linalg.norm( np.array([source_loc[0],source_loc[-1]])- np.array([current_position[0],current_position[-1]]))}")
             # if config.DISPLAY_RESOLUTION != model_resolution:

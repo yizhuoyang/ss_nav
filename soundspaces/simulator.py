@@ -662,9 +662,9 @@ class SoundSpacesSim(Simulator, ABC):
                 distractor_convolved = np.array([fftconvolve(self._source_sound_dict[self._current_distractor_sound],
                                                              distractor_rir[:, channel]
                                                              ) for channel in range(distractor_rir.shape[-1])])
-                                                             
+
                 distractor_seg = distractor_convolved[:, :sampling_rate].astype(np.float32)
-                snr_db = 70
+                snr_db = 50
                 sig = audiogoal[:, :sampling_rate].astype(np.float32)
 
                 eps = 1e-12
