@@ -120,7 +120,7 @@ _TC.TASK.SPECTROGRAM_SENSOR.TYPE = "SpectrogramSensor"
 # -----------------------------------------------------------------------------
 _TC.SIMULATOR.GRID_SIZE = 0.5
 _TC.SIMULATOR.CONTINUOUS_VIEW_CHANGE = False
-_TC.SIMULATOR.VIEW_CHANGE_FPS = 10
+_TC.SIMULATOR.VIEW_CHANGE_FPS = 5
 _TC.SIMULATOR.SCENE_DATASET = 'replica'
 _TC.SIMULATOR.USE_RENDERED_OBSERVATIONS = True
 _TC.SIMULATOR.SCENE_OBSERVATION_DIR = 'data/scene_observations'

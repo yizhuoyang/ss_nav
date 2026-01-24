@@ -701,7 +701,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.FOLLOW_SHORTEST_PATH = True
 
@@ -810,13 +810,13 @@ class PPOTrainer(BaseRLTrainer):
             self.belief_predictor.eval()
         
 
-        t = tqdm(total=70000)
-
-        TURN_STEPS_FULL = 4          # 90° * 4 = 360°
-        spin_remaining = 0           # 0 表示不在转圈阶段
+        t = tqdm(total=1000)
+        print("ruok!!!!!!!!!!!!!!!!!!!!!!",self.config.TEST_EPISODE_COUNT)
+        # TURN_STEPS_FULL = 4          # 90° * 4 = 360°
+        # spin_remaining = 0           # 0 表示不在转圈阶段
     
         while (
-            len(stats_episodes) < 70000
+            len(stats_episodes) < 1000
             and self.envs.num_envs > 0
         ):
 
@@ -831,53 +831,84 @@ class PPOTrainer(BaseRLTrainer):
             state = sim.get_agent_state()
             q = state.rotation
             q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
-            pose_all = np.concatenate([observations[0]['pose'], state.position, q_np], axis=0)
-
+            # pose_all = np.concatenate([observations[0]['pose'], state.position, q_np], axis=0)
+            pose_all = observations[0]['pose']
             step_idx = int(pose_all[3])
 
-            if step_idx != 0:
-                current_scenc = sim._current_scene
-                scene_dir = os.path.dirname(current_scenc)
-                scene_name = os.path.basename(scene_dir)
+            current_scenc = sim._current_scene
+            scene_dir = os.path.dirname(current_scenc)
+            scene_name = os.path.basename(scene_dir)
+            episode_id = current_episodes[0].episode_id
+            state = sim.get_agent_state()
+            current_position = state.position
+            current_rotation = state.rotation
 
-                source_loc = sim.graph.nodes[sim._source_position_index]['point']
-                episode_id = current_episodes[0].episode_id
+            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz"
+            save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
+            os.makedirs(save_dir, exist_ok=True)
+            td = infos[0]["top_down_map"]
+            H, W = td["map"].shape[:2]
 
-                folder_name = f"{scene_name}_{episode_id}"
-                save_dir = os.path.join(base_dir, folder_name)
-                os.makedirs(save_dir, exist_ok=True)
+            bounds = sim.pathfinder.get_bounds()
+            (minx, miny, minz), (maxx, maxy, maxz) = bounds
+            mpp_x = (maxx - minx) / float(W)
+            mpp_z = (maxz - minz) / float(H)
 
-                audio_wave = observations[0]['audiogoal']
-                rgb = observations[0]['rgb']
-                depth = observations[0]['depth'].squeeze(-1)
-                ego_map = observations[0]['ego_map']
-                print(depth.shape,rgb.shape)
-                print(depth.min(),depth.max())
-                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-                np.savez_compressed(
-                    save_path,
-                    pose_all=pose_all,
-                    rgb=rgb,
-                    depth=depth,
-                    audio_wave=audio_wave,
-                    source_loc=source_loc,
-                    ego_map=ego_map
-                )
+            np.savez_compressed(
+                os.path.join(save_dir, f"{pose_all[-1]}.npz"),
+                map=td["map"],
+                fog_of_war_mask=td["fog_of_war_mask"],
+                agent_map_coord=np.array(td["agent_map_coord"], dtype=np.int32),
+                agent_angle=np.array(td["agent_angle"], dtype=np.float32),
+                agent_pos=np.array([current_position[0],current_position[-1]]),
+                bounds=np.array(bounds, dtype=np.float32),     # (2,3)
+                map_shape=np.array([H, W], dtype=np.int32),
+                meters_per_pixel_x=np.array(mpp_x, dtype=np.float32),
+                meters_per_pixel_z=np.array(mpp_z, dtype=np.float32),
+            )
+            # if step_idx != 0:
+            #     current_scenc = sim._current_scene
+            #     scene_dir = os.path.dirname(current_scenc)
+            #     scene_name = os.path.basename(scene_dir)
+
+            #     source_loc = sim.graph.nodes[sim._source_position_index]['point']
+            #     episode_id = current_episodes[0].episode_id
+
+            #     folder_name = f"{scene_name}_{episode_id}"
+            #     save_dir = os.path.join(base_dir, folder_name)
+            #     os.makedirs(save_dir, exist_ok=True)
+
+            #     audio_wave = observations[0]['audiogoal']
+            #     rgb = observations[0]['rgb']
+            #     depth = observations[0]['depth'].squeeze(-1)
+            #     ego_map = observations[0]['ego_map']
+            #     print(depth.shape,rgb.shape)
+            #     print(depth.min(),depth.max())
+            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+            #     np.savez_compressed(
+            #         save_path,
+            #         pose_all=pose_all,
+            #         rgb=rgb,
+            #         depth=depth,
+            #         audio_wave=audio_wave,
+            #         source_loc=source_loc,
+            #         ego_map=ego_map
+            #     )
 
 
-            if step_idx !=0:
-                save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
-                np.savez_compressed(
-                    save_path,
-                    pose_all=pose_all,
-                    rgb=rgb,
-                    depth=depth,
-                    audio_wave=audio_wave,
-                    source_loc=source_loc,
-                    ego_map   = ego_map
-                )
-            print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print("The pose is", observations[0]['pose'], state.position, state.rotation)
+            # if step_idx !=0:
+            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+            #     np.savez_compressed(
+            #         save_path,
+            #         pose_all=pose_all,
+            #         rgb=rgb,
+            #         depth=depth,
+            #         audio_wave=audio_wave,
+            #         source_loc=source_loc,
+            #         ego_map   = ego_map
+            #     )
+            # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
+            # print("The pose is", observations[0]['pose'], state.position, state.rotation)
             ###################### Add the sensor here #####################################
 
             if self.config.DISPLAY_RESOLUTION != model_resolution:

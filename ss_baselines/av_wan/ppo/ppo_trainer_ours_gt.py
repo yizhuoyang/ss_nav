@@ -814,8 +814,8 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz"
-            save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
+            save_dir = "/home/Disk/yyz/sound-spaces/vis/debug_npz"
+            save_dir = os.path.join(save_dir,f"{scene_name}_{episode_id}")
             os.makedirs(save_dir, exist_ok=True)
             td = infos[0]["top_down_map"]
             H, W = td["map"].shape[:2]

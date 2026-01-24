@@ -9,6 +9,7 @@ from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from typing import Optional
 import logging
 import sys
+import os
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 from prob_update_doa import StreamingSourceMapFusion, align_for_occ
@@ -113,7 +114,7 @@ class MapNavEnv(habitat.RLEnv):
 
         if use_visual and audio_intensity ==0:
             sound_map_gaussian =sound_map
-            exp = geometric_map[:, :, 1] > 0.5  
+            # exp = geometric_map[:, :, 1] > 0.5  
             vis_map            = vis_fuser.P
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
@@ -152,6 +153,14 @@ class MapNavEnv(habitat.RLEnv):
             # print(self._env.sim._episode_step_count,self._env.task.is_stop_called,action,self._episode_success(),self._env.sim.reaching_goal)
             while action in (HabitatSimActions.TURN_LEFT, HabitatSimActions.TURN_RIGHT):
                 observation, reward, done, info = super().step({"action": action})
+                # save_dir = "/home/Disk/yyz/sound-spaces/vis/debug_npz_ral"
+                # save_dir = os.path.join(save_dir,id_name)
+                # os.makedirs(save_dir, exist_ok=True)
+                # np.savez_compressed(
+                #     os.path.join(save_dir, f"{self._env.sim._episode_step_count}.npz"),
+                #     agent_pos=np.array([agent_pose[0],agent_pose[-1]])
+                # )
+                
                 if len(self._config.VIDEO_OPTION) > 0:
                     if "rgb" not in observation:
                         observation["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
@@ -181,6 +190,7 @@ class MapNavEnv(habitat.RLEnv):
                     action = HabitatSimActions.STOP
                 else:
                     action = self.planner.plan_world(observation, goal_world=world_goal, stop=stop,id_name=id_name,save_vis=save_vis,source=target_goal)
+                    # action = HabitatSimActions.MOVE_FORWARD
 
                 # print(self._env.sim._episode_step_count,self._env.task.is_stop_called,action,self._episode_success(),self._env.sim.reaching_goal)
 
@@ -191,6 +201,15 @@ class MapNavEnv(habitat.RLEnv):
             #     action = HabitatSimActions.STOP
 
             observation, reward, done, info = super().step({"action": action})
+
+            # save_dir = "/home/Disk/yyz/sound-spaces/vis/debug_npz_ral"
+            # save_dir = os.path.join(save_dir,id_name)
+            # os.makedirs(save_dir, exist_ok=True)
+            # np.savez_compressed(
+            #     os.path.join(save_dir, f"{self._env.sim._episode_step_count}.npz"),
+            #     agent_pos=np.array([agent_pose[0],agent_pose[-1]])
+            # )
+
 
             if len(self._config.VIDEO_OPTION) > 0:
                 if "rgb" not in observation:

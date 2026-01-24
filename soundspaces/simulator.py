@@ -202,6 +202,9 @@ class SoundSpacesSim(Simulator, ABC):
                 "linear_friction",
                 "angular_friction",
                 "coefficient_of_restitution",
+                #TODO YYZ
+                "distractor_sound_id",
+                "distractor_position_index"
             },
         )
 

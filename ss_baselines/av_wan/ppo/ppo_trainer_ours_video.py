@@ -18,14 +18,14 @@ import sys
 sys.path.append("/media/kemove/data/av_nav/network/audionet")
 sys.path.append("/media/kemove/data/av_nav/utlis")
 sys.path.append("/media/kemove/data/av_nav/network/visual_infer")
-# sys.path.append("/media/kemove/data/av_nav/network/av_map")
-from ss_baselines.common.clap_utils import *
+sys.path.append("/media/kemove/data/av_nav/network/av_map/")
+from clap_utils import *
 from yolo_heatmap import yolo_infer, mask_depth_to_binary_topdown, StreamingVisualMapFusion
 from prob_update import GlobalSoundMapRefiner,quaternion_to_heading_y,source_in_agent_frame,localmap_argmax_world
 from prob_update_doa import StreamingSourceMapFusion, align_for_occ
 from ssl_net_infer import SSLNet,SSLNet_DOA,SSLNet_depth_DOA
-from ss_baselines.savi.pretraining_compare.audiogoal_predictor import AudioGoalPredictor_infer
-# from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPredictor_infer
+# from ss_baselines.savi.pretraining_compare.audiogoal_predictor import AudioGoalPredictor_infer
+from ss_baselines.savi.pretraining_ours.audiogoal_predictor import AudioGoalPredictor_infer
 from ultralytics import YOLO
 import numpy as np
 import torch
@@ -50,7 +50,7 @@ from ss_baselines.common.utils import (
 )
 from ss_baselines.av_wan.ppo import AudioNavBaselinePolicy
 from ss_baselines.av_wan.ppo import PPO
-from habitat.utils.visualizations.utils import observations_to_image
+
 
 
 
@@ -548,7 +548,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.TASK_CONFIG.TASK.SENSORS.append("AUDIOGOAL_SENSOR")
         config.freeze()
@@ -617,7 +617,6 @@ class PPOTrainer(BaseRLTrainer):
             self.metric_uuids.append(measure_type(sim=None, task=None, config=None)._get_uuid())
 
         observations = self.envs.reset()
-
         # if self.config.DISPLAY_RESOLUTION != model_resolution:
         #     resize_observation(observations, model_resolution)
         batch = batch_obs(observations, self.device)
@@ -659,12 +658,12 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = True
+        use_visual = False
         save_vis   = False
         if use_visual:
             beta_r = 0.2
         else:
-            beta_r = 1.0
+            beta_r = 0.2
 
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
@@ -689,7 +688,6 @@ class PPOTrainer(BaseRLTrainer):
         id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
         text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").to(self.device)
         db_path = "/media/kemove/data/av_nav/data/audio_embeddings/audio_mean_1s.pt"
-        # db_path = "/media/kemove/data/av_nav/data/audio_embeddings_sup/all_splits_class_mean_1s.pt"
 
         total_exp   = 0
         success_exp = 0
@@ -719,7 +717,7 @@ class PPOTrainer(BaseRLTrainer):
                     names  = []
                     scores = []
                     seen = set()
-                    acc = AudioTopKAccumulator(n_steps=5, topk=5, mode="ema", alpha=0.6,final_k=1)
+                    acc = AudioTopKAccumulator(n_steps=5, topk=3, mode="sum") 
                     yolo_is_set = False
                     best_name = None
                     # audio_hist = AudioHistory5s(window_seconds=5.0, sr=16000)
@@ -728,12 +726,12 @@ class PPOTrainer(BaseRLTrainer):
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
-            depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
-            depth = depth.permute(2,0,1).to(self.device)      
-            # depth = observations[0]["depth"][:,:,0]/10
-            # depth = cv2.resize(depth,(128,128),interpolation=cv2.INTER_NEAREST)
-            # depth = torch.as_tensor(depth).float().unsqueeze(-1)
-            # depth = depth.permute(2,0,1).to(self.device)
+            # depth = torch.as_tensor(observations[0]["depth"]).float().squeeze(-1) 
+            # depth = depth.permute(2,0,1).to(self.device)      
+            depth = observations[0]["depth"][:,:,0]/10
+            depth = cv2.resize(depth,(128,128),interpolation=cv2.INTER_NEAREST)
+            depth = torch.as_tensor(depth).float().unsqueeze(-1)
+            depth = depth.permute(2,0,1).to(self.device)
 
             rgb      = torch.as_tensor(observations[0]['rgb']).squeeze(-1).float().to(self.device)
             rgb      = torch.permute(rgb, (2,0,1)).unsqueeze(0)  # (H,W,C) -> (C,H,W)
@@ -753,6 +751,7 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa,pred_r = model(spectrogram,depth.unsqueeze(0))
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
+
             if use_visual:
                 if audio_intensity <= 0:
                     if yolo_is_set:
@@ -769,10 +768,10 @@ class PPOTrainer(BaseRLTrainer):
                     query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
                     topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
                     best_name, locked = acc.update(topk_objs)
-                    # print("best name:",best_name,"locked:",object_class)
+                    # print(best_name, locked,object_class)
                     # 4) once locked, set yolo once
                     if locked and (best_name is not None) and (not yolo_is_set):
-                        model_yolo.set_classes(best_name, model_yolo.get_text_pe(best_name))
+                        model_yolo.set_classes([best_name], model_yolo.get_text_pe([best_name]))
                         yolo_is_set = True
 
                     # 5) run yolo only after set
@@ -839,7 +838,7 @@ class PPOTrainer(BaseRLTrainer):
                     "agent_pos": np.array([current_position[0],current_position[-1]]),
                     "audio_intensity": audio_intensity,
                     "use_visual": use_visual,
-                    "id_name": f"{scene_name}_{episode_id}",
+                    "id_name": f"{scene_name}_{episode_id}_{object_class}",
                     "save_vis": save_vis,
                     "step": pose_all[-1]
                 }
@@ -863,9 +862,18 @@ class PPOTrainer(BaseRLTrainer):
 
 
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
+            # print((observations[0]['intermediate'][0]['depth'].shape))
+            # print((infos[0]['rgb_frames']))
+            observations[0]['intermediate'] = observations[0]['rgb']
+            observations[0]['collision'] = observations[0]['collision'][0]
+            # print(observations[0]['intermediate'])
+            # # print(observations[0]['pose'],observations[0]['spectrogram'].shape,observations[0]['ego_map'].shape)
+            # # print(observations[0]['intermediate'])
+            # for obs_sensor, obs_value in observations[0].items():
+            #     print(obs_sensor, type(obs_value))
+            #     print(f"{obs_sensor} -> {obs_value.shape}")
             ###########3 Save the final position for vis################
-            # silence = sim.is_silent
-            # silence = np.array(silence)
+
             # save_dir = "/home/Disk/yyz/sound-spaces/debug_npz_ours"
             # save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
             # os.makedirs(save_dir, exist_ok=True)

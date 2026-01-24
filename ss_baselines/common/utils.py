@@ -143,6 +143,7 @@ def batch_obs(
         for sensor in obs:
             if sensor in skip_list:
                 continue
+
             batch[sensor].append(to_tensor(obs[sensor]).float())
 
     for sensor in batch:
@@ -233,7 +234,7 @@ def plot_top_down_map(info, dataset='replica', pred=None, source_world=None):
         top_down_map, info["top_down_map"]["fog_of_war_mask"]
     )
     map_agent_pos = info["top_down_map"]["agent_map_coord"]  # (row, col) in map
-    print("here")
+    # print("here")
     if dataset == 'replica':
         agent_radius_px = top_down_map.shape[0] // 16
     else:

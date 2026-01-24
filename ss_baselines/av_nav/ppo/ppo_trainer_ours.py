@@ -453,7 +453,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # if len(self.config.VIDEO_OPTION) > 0:
         config.defrost()
-        # config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
         config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
         config.FOLLOW_SHORTEST_PATH = True
         config.freeze()
@@ -604,11 +604,14 @@ class PPOTrainer(BaseRLTrainer):
             # pose_all = np.concatenate([observations[0]['pose'],state.position, q_np], axis=0)
             # # print(pose_all)
             current_scenc = sim._current_scene
-            # scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
-            # scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
+            scene_dir = os.path.dirname(current_scenc)          # .../mp3d/QUCTc6BB5sX
+            scene_name = os.path.basename(scene_dir)           # QUCTc6BB5sX
             source_loc    = sim.graph.nodes[sim._source_position_index]['point']
             source_loc_np = np.array(source_loc)
-            # episode_id = current_episodes[0].episode_id
+            episode_id = current_episodes[0].episode_id
+            # state = sim.get_agent_state()
+            # current_position = state.position
+            # current_rotation = state.rotation
             # folder_name = f"{scene_name}_{episode_id}"
             # save_dir = os.path.join(base_dir, folder_name)
             # os.makedirs(save_dir, exist_ok=True)
@@ -629,8 +632,16 @@ class PPOTrainer(BaseRLTrainer):
             #         source_loc=source_loc,
             #         ego_map   = ego_map
             #     )
+
+            # save_dir = "/home/Disk/yyz/sound-spaces/debug_npz"
+            # save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
+            # os.makedirs(save_dir, exist_ok=True)
+            # np.savez_compressed(
+            #     os.path.join(save_dir, f"{pose_all[-1]}.npz"),
+            #     agent_pos=np.array([current_position[0],current_position[-1]])
+            # )
             # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
-            print(current_scenc,"The pose is",  state.position, state.rotation,source_loc)
+            # print(current_scenc,"The pose is",  state.position, state.rotation,source_loc)
             ###################### Add the sensor here #####################################
 
             for i in range(self.envs.num_envs):
