@@ -144,7 +144,7 @@ class DDPPOTrainer(PPOTrainer):
 
         if self.config.RL.DDPPO.pretrained:
             # load weights for both actor critic and the encoder
-            pretrained_state = torch.load(self.config.RL.DDPPO.pretrained_weights, map_location="cpu")
+            pretrained_state = torch.load(self.config.RL.DDPPO.pretrained_weights,weights_only=False ,map_location="cpu")
             self.actor_critic.load_state_dict(
                 {
                     k[len("actor_critic."):]: v

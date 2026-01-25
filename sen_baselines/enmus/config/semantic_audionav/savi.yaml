@@ -1,5 +1,6 @@
 BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal.yaml"
-TRAINER_NAME: "ddppo"
+# BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal_distractor.yaml"
+TRAINER_NAME: "ddppo" #AVNavTrainer
 NUM_PROCESSES: 8
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR"]
 NUM_UPDATES: 20000
@@ -57,6 +58,6 @@ RL:
     num_recurrent_layers: 1
     backbone: "custom_resnet18"
     # choose the best pretrained SAVi based on validation curve
-    pretrained_weights: "data/models/savi/data/ckpt.23.pth"
+    pretrained_weights: "data/models/savi/data_pretrain/ckpt.23.pth"
     pretrained: True
     reset_critic: False

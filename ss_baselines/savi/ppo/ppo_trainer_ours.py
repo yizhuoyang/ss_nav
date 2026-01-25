@@ -20,7 +20,7 @@ import torch
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 from numpy.linalg import norm
-
+from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from habitat import Config, logger
 from ss_baselines.common.utils import observations_to_image
 from ss_baselines.common.base_trainer import BaseRLTrainer
@@ -117,7 +117,6 @@ class PPOTrainer(BaseRLTrainer):
             )
 
             if ppo_cfg.use_belief_predictor:
-                
                 belief_cfg = ppo_cfg.BELIEF_PREDICTOR
                 smt = self.actor_critic.net.smt_state_encoder
                 self.belief_predictor = BeliefPredictor(belief_cfg, self.device, smt._input_size, smt._pose_indices,
@@ -186,7 +185,7 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             dict containing checkpoint info
         """
-        return torch.load(checkpoint_path, weights_only=False,*args, **kwargs)
+        return torch.load(checkpoint_path, *args, **kwargs)
 
     def try_to_resume_checkpoint(self):
         checkpoints = glob.glob(f"{self.config.CHECKPOINT_FOLDER}/*.pth")
@@ -290,8 +289,6 @@ class PPOTrainer(BaseRLTrainer):
 
         outputs = self.envs.step([a[0].item() for a in actions])
         observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
-
-
         logging.debug('Reward: {}'.format(rewards[0]))
 
         env_time += time.time() - t_step_env
@@ -676,12 +673,13 @@ class PPOTrainer(BaseRLTrainer):
         Returns:
             None
         """
-        random.seed(self.config.SEED)
-        np.random.seed(self.config.SEED)
-        torch.manual_seed(self.config.SEED)
-            
+        SEED = 100
+        random.seed(SEED)
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
+        base_dir = '/home/Disk/sound-space/ssl_data_semantic/val_128'
         # Map location CPU is almost always better than mapping to a CUDA device.
-        ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
+        ckpt_dict = self.load_checkpoint(checkpoint_path, weights_only=False,map_location="cpu")
 
         if self.config.EVAL.USE_CKPT_CONFIG:
             config = self._setup_eval_config(ckpt_dict["config"])
@@ -701,24 +699,23 @@ class PPOTrainer(BaseRLTrainer):
             model_resolution = self.config.DISPLAY_RESOLUTION
         config.freeze()
 
-        if len(self.config.VIDEO_OPTION) > 0:
-            config.defrost()
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
-            config.freeze()
-        elif "top_down_map" in self.config.VISUALIZATION_OPTION:
-            config.defrost()
-            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
-            config.freeze()
+        # if len(self.config.VIDEO_OPTION) > 0:
+        config.defrost()
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+        config.FOLLOW_SHORTEST_PATH = True
+
+        # elif "top_down_map" in self.config.VISUALIZATION_OPTION:
+        #     config.defrost()
+        #     config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        #     config.FOLLOW_SHORTEST_PATH = True
+        #     config.freeze()
+        config.freeze()
 
         logger.info(f"env config: {config}")
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME)
         )
-
-        habitat_env = self.envs.workers[0]._env.habitat_env
-        sim = habitat_env.sim
-
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
             # observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
@@ -727,7 +724,13 @@ class PPOTrainer(BaseRLTrainer):
             observation_space = self.envs.observation_spaces[0]
         self._setup_actor_critic_agent(ppo_cfg, observation_space)
 
-        self.agent.load_state_dict(ckpt_dict["state_dict"])
+        # if config.FOLLOW_SHORTEST_PATH:
+        #     follower = ShortestPathFollower(
+        #         self.envs.workers[0]._env.habitat_env.sim, 0.5, False
+        #     )
+        sim = self.envs.workers[0]._env.habitat_env.sim
+
+        # self.agent.load_state_dict(ckpt_dict["state_dict"])
         self.actor_critic = self.agent.actor_critic
         if self.config.RL.PPO.use_belief_predictor and "belief_predictor" in ckpt_dict:
             self.belief_predictor.load_state_dict(ckpt_dict["belief_predictor"])
@@ -743,12 +746,9 @@ class PPOTrainer(BaseRLTrainer):
             self.metric_uuids.append(measure_type(sim=None, task=None, config=None)._get_uuid())
 
         observations = self.envs.reset()
-        if config.DISPLAY_RESOLUTION != model_resolution:
-            obs_copy = resize_observation(observations, model_resolution)
-        else:
-            obs_copy = observations
-        batch = batch_obs(obs_copy, self.device, skip_list=['view_point_goals', 'intermediate',
-                                                            'oracle_action_sensor'])
+        if self.config.DISPLAY_RESOLUTION != model_resolution:
+            resize_observation(observations, model_resolution)
+        batch = batch_obs(observations, self.device)
 
         current_episode_reward = torch.zeros(
             self.envs.num_envs, 1, device=self.device
@@ -808,66 +808,113 @@ class PPOTrainer(BaseRLTrainer):
         self.actor_critic.eval()
         if self.config.RL.PPO.use_belief_predictor:
             self.belief_predictor.eval()
-        t = tqdm(total=self.config.TEST_EPISODE_COUNT)
+        
+
+        t = tqdm(total=1000)
+        print("ruok!!!!!!!!!!!!!!!!!!!!!!",self.config.TEST_EPISODE_COUNT)
+        # TURN_STEPS_FULL = 4          # 90° * 4 = 360°
+        # spin_remaining = 0           # 0 表示不在转圈阶段
+    
         while (
-            len(stats_episodes) < self.config.TEST_EPISODE_COUNT
+            len(stats_episodes) < 1000
             and self.envs.num_envs > 0
         ):
 
-            habitat_env = self.envs.workers[0]._env.habitat_env
-            sim = habitat_env.sim
+            # print(f"Collected {len(stats_episodes)}/{self.config.TEST_EPISODE_COUNT} episodes", end='\r')
+            # ===== 每个 step =====
             current_episodes = self.envs.current_episodes()
-            # print(current_episodes[0])
-            object_class = current_episodes[0].object_category
-            episode_id = current_episodes[0].episode_id
-            # print(current_episodes[0].scene_id,
-                #    current_episodes[0].episode_id,)
-            # print(f"Evaluating episode {episode_id} with object class {object_class} ")
-            current_scenc = current_episodes[0].scene_id
+            oracle_actions = sim.compute_oracle_actions()
+
+            outputs = self.envs.step(oracle_actions)
+            observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
+
+            state = sim.get_agent_state()
+            q = state.rotation
+            q_np = np.array([q.w, q.x, q.y, q.z], dtype=np.float32)
+            # pose_all = np.concatenate([observations[0]['pose'], state.position, q_np], axis=0)
+            pose_all = observations[0]['pose']
+            step_idx = int(pose_all[3])
+
+            current_scenc = sim._current_scene
             scene_dir = os.path.dirname(current_scenc)
             scene_name = os.path.basename(scene_dir)
-            pose_all = observations[0]['pose']
-            # print(f"{scene_name}_ep{episode_id}")
+            episode_id = current_episodes[0].episode_id
             state = sim.get_agent_state()
             current_position = state.position
             current_rotation = state.rotation
-            source_loc    = sim.graph.nodes[sim._source_position_index]['point']
-            # print(current_position, source_loc)
-            # print(f"Start position: {current_position}, rotation: {current_rotation}")
-            with torch.no_grad():
-                _, actions, _, test_recurrent_hidden_states, test_em_features = self.actor_critic.act(
-                    batch,
-                    test_recurrent_hidden_states,
-                    prev_actions,
-                    not_done_masks,
-                    test_em.memory[:, 0] if ppo_cfg.use_external_memory else None,
-                    test_em.masks if ppo_cfg.use_external_memory else None,
-                    deterministic=False
-                )
 
-                prev_actions.copy_(actions)
+            save_dir = "/home/Disk/yyz/sound-spaces/debug_npz"
+            save_dir = os.path.join(save_dir,f"{scene_name}_ep{episode_id}")
+            os.makedirs(save_dir, exist_ok=True)
+            td = infos[0]["top_down_map"]
+            H, W = td["map"].shape[:2]
 
-            actions = [a[0].item() for a in actions]
-            outputs = self.envs.step(actions)
+            bounds = sim.pathfinder.get_bounds()
+            (minx, miny, minz), (maxx, maxy, maxz) = bounds
+            mpp_x = (maxx - minx) / float(W)
+            mpp_z = (maxz - minz) / float(H)
 
-            observations, rewards, dones, infos = [
-                list(x) for x in zip(*outputs)
-            ]
+            np.savez_compressed(
+                os.path.join(save_dir, f"{pose_all[-1]}.npz"),
+                map=td["map"],
+                fog_of_war_mask=td["fog_of_war_mask"],
+                agent_map_coord=np.array(td["agent_map_coord"], dtype=np.int32),
+                agent_angle=np.array(td["agent_angle"], dtype=np.float32),
+                agent_pos=np.array([current_position[0],current_position[-1]]),
+                bounds=np.array(bounds, dtype=np.float32),     # (2,3)
+                map_shape=np.array([H, W], dtype=np.int32),
+                meters_per_pixel_x=np.array(mpp_x, dtype=np.float32),
+                meters_per_pixel_z=np.array(mpp_z, dtype=np.float32),
+            )
+            # if step_idx != 0:
+            #     current_scenc = sim._current_scene
+            #     scene_dir = os.path.dirname(current_scenc)
+            #     scene_name = os.path.basename(scene_dir)
 
-            # save_dir = "/home/Disk/yyz/sound-spaces/vis/debug_npz_enmus"
-            # save_dir = os.path.join(save_dir,f"{scene_name}_{episode_id}")
-            # os.makedirs(save_dir, exist_ok=True)
-            # np.savez_compressed(
-            #     os.path.join(save_dir, f"{pose_all[-1]}.npz"),
-            #     agent_pos=np.array([current_position[0],current_position[-1]])
-            # )
+            #     source_loc = sim.graph.nodes[sim._source_position_index]['point']
+            #     episode_id = current_episodes[0].episode_id
 
-            if config.DISPLAY_RESOLUTION != model_resolution:
-                obs_copy = resize_observation(observations, model_resolution)
-            else:
-                obs_copy = observations
-            batch = batch_obs(obs_copy, self.device, skip_list=['view_point_goals', 'intermediate',
-                                                                'oracle_action_sensor'])
+            #     folder_name = f"{scene_name}_{episode_id}"
+            #     save_dir = os.path.join(base_dir, folder_name)
+            #     os.makedirs(save_dir, exist_ok=True)
+
+            #     audio_wave = observations[0]['audiogoal']
+            #     rgb = observations[0]['rgb']
+            #     depth = observations[0]['depth'].squeeze(-1)
+            #     ego_map = observations[0]['ego_map']
+            #     print(depth.shape,rgb.shape)
+            #     print(depth.min(),depth.max())
+            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+            #     np.savez_compressed(
+            #         save_path,
+            #         pose_all=pose_all,
+            #         rgb=rgb,
+            #         depth=depth,
+            #         audio_wave=audio_wave,
+            #         source_loc=source_loc,
+            #         ego_map=ego_map
+            #     )
+
+
+            # if step_idx !=0:
+            #     save_path = os.path.join(save_dir, f"step_{step_idx}.npz")
+            #     np.savez_compressed(
+            #         save_path,
+            #         pose_all=pose_all,
+            #         rgb=rgb,
+            #         depth=depth,
+            #         audio_wave=audio_wave,
+            #         source_loc=source_loc,
+            #         ego_map   = ego_map
+            #     )
+            # print(current_scenc,source_loc,current_episodes[0].episode_id,current_episodes[0].scene_id)
+            # print("The pose is", observations[0]['pose'], state.position, state.rotation)
+            ###################### Add the sensor here #####################################
+
+            if self.config.DISPLAY_RESOLUTION != model_resolution:
+                resize_observation(observations, model_resolution)
+            batch = batch_obs(observations, self.device)
+
 
             not_done_masks = torch.tensor(
                 [[0.0] if done else [1.0] for done in dones],
@@ -875,8 +922,8 @@ class PPOTrainer(BaseRLTrainer):
                 device=self.device,
             )
             # Update external memory
-            if ppo_cfg.use_external_memory:
-                test_em.insert(test_em_features, not_done_masks)
+            # if ppo_cfg.use_external_memory:
+            #     test_em.insert(test_em_features, not_done_masks)
             if self.config.RL.PPO.use_belief_predictor:
                 self.belief_predictor.update(batch, dones)
 
@@ -887,13 +934,13 @@ class PPOTrainer(BaseRLTrainer):
                     location_gt = batch['pointgoal_with_gps_compass'].cpu().numpy()[i]
                     if dones[i]:
                         geodesic_distance = -1
+                        spin_remaining = 0
                     else:
                         geodesic_distance = infos[i]['distance_to_goal']
                     pair = (category_prediction, location_prediction, category_gt, location_gt, geodesic_distance)
                     if 'view_point_goals' in observations[i]:
                         pair += (observations[i]['view_point_goals'],)
                     descriptor_pred_gt[i].append(pair)
-
             for i in range(self.envs.num_envs):
                 if len(self.config.VIDEO_OPTION) > 0:
                     if self.config.RL.PPO.use_belief_predictor:
@@ -909,7 +956,8 @@ class PPOTrainer(BaseRLTrainer):
                     if "rgb" not in observations[i]:
                         observations[i]["rgb"] = np.zeros((self.config.DISPLAY_RESOLUTION,
                                                            self.config.DISPLAY_RESOLUTION, 3))
-                    frame = observations_to_image(observations[i], infos[i], pred=pred)
+                    # print(infos[i])
+                    frame = observations_to_image(observations[i], infos[i], pred=None)
                     rgb_frames[i].append(frame)
                     audios[i].append(observations[i]['audiogoal'])
 
@@ -919,9 +967,7 @@ class PPOTrainer(BaseRLTrainer):
             current_episode_reward += rewards
             next_episodes = self.envs.current_episodes()
             envs_to_pause = []
-
-            # TODO YYZ
-            for i in range(1):
+            for i in range(self.envs.num_envs):
                 # pause envs which runs out of episodes
                 if (
                     next_episodes[i].scene_id,

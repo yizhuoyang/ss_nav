@@ -36,7 +36,7 @@ _C.VIDEO_OPTION = ["disk", "tensorboard"]
 _C.VISUALIZATION_OPTION = ["top_down_map"]
 _C.TENSORBOARD_DIR = "tb"
 _C.VIDEO_DIR = "video_dir"
-_C.TEST_EPISODE_COUNT = 1000
+_C.TEST_EPISODE_COUNT = 2
 _C.EVAL_CKPT_PATH_DIR = "data/checkpoints"  # path to ckpt or path to ckpts dir
 _C.NUM_PROCESSES = 16
 _C.SENSORS = ["RGB_SENSOR", "DEPTH_SENSOR"]
@@ -58,7 +58,7 @@ _C.CONTINUOUS = False
 # -----------------------------------------------------------------------------
 _C.EVAL = CN()
 # The split to evaluate on
-_C.EVAL.SPLIT = "train"
+_C.EVAL.SPLIT = "val"
 _C.EVAL.USE_CKPT_CONFIG = True
 # -----------------------------------------------------------------------------
 # REINFORCEMENT LEARNING (RL) ENVIRONMENT CONFIG
@@ -156,7 +156,7 @@ _TC.SIMULATOR.CONTINUOUS_VIEW_CHANGE = False
 _TC.SIMULATOR.VIEW_CHANGE_FPS = 10
 _TC.SIMULATOR.SCENE_DATASET = 'replica'
 _TC.SIMULATOR.USE_RENDERED_OBSERVATIONS = True
-_TC.SIMULATOR.SCENE_OBSERVATION_DIR = 'data/scene_observations'
+_TC.SIMULATOR.SCENE_OBSERVATION_DIR = 'data/scene_observations_128'
 _TC.SIMULATOR.AUDIO = CN()
 _TC.SIMULATOR.AUDIO.SCENE = ""
 _TC.SIMULATOR.AUDIO.EVERLASTING = True
@@ -197,19 +197,21 @@ _TC.TASK.LOCATION_BELIEF = SIMULATOR_SENSOR.clone()
 _TC.TASK.LOCATION_BELIEF.TYPE = "LocationBelief"
 _TC.TASK.SUCCESS_WHEN_SILENT = CN()
 _TC.TASK.SUCCESS_WHEN_SILENT.TYPE = "SWS"
+# -----------------------------------------------------------------------------
+# POSE SENSOR
+# -----------------------------------------------------------------------------
+_TC.TASK.POSE_SENSOR = CN()
+_TC.TASK.POSE_SENSOR.TYPE = "PoseSensor"
 
 # -----------------------------------------------------------------------------
 # Egocentric occupancy map projected from depth image
+# -----------------------------------------------------------------------------
 _TC.TASK.EGOMAP_SENSOR = SIMULATOR_SENSOR.clone()
 _TC.TASK.EGOMAP_SENSOR.TYPE = "EgoMap"
 _TC.TASK.EGOMAP_SENSOR.MAP_SIZE = 31
 _TC.TASK.EGOMAP_SENSOR.MAP_RESOLUTION = 0.1
 _TC.TASK.EGOMAP_SENSOR.HEIGHT_THRESH = (0.5, 2.0)
-
-# POSE SENSOR
-# -----------------------------------------------------------------------------
-_TC.TASK.POSE_SENSOR = CN()
-_TC.TASK.POSE_SENSOR.TYPE = "PoseSensor"
+# ------------------------------------------------------
 # -----------------------------------------------------------------------------
 # SEMANTIC OBJECT SENSOR
 # -----------------------------------------------------------------------------
@@ -287,16 +289,12 @@ def get_config(
     else:
         # overwrite training configs
         config.defrost()
-        config.NUM_PROCESSES = 1
+        config.NUM_PROCESSES = 10
         if config.EVAL.SPLIT.startswith('val'):
             config.USE_SYNC_VECENV = True
             config.TEST_EPISODE_COUNT = 500
         elif config.EVAL.SPLIT.startswith('test'):
-            # config.TEST_EPISODE_COUNT = 1000
             config.TEST_EPISODE_COUNT = 1000
-        elif config.EVAL.SPLIT.startswith('train'):
-            config.TEST_EPISODE_COUNT = 1000
-            # config.TEST_EPISODE_COUNT = 4
         else:
             raise ValueError('Dataset split must starts with train, val or test!')
         config.freeze()

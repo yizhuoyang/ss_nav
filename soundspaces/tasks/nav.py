@@ -74,8 +74,8 @@ class SpectrogramSensor(Sensor):
         return SensorTypes.PATH
 
     def _get_observation_space(self, *args: Any, **kwargs: Any):
-        # spectrogram = self.compute_spectrogram(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
-        spectrogram = self.compute_stft_phase_features(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
+        spectrogram = self.compute_spectrogram(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
+        # spectrogram = self.compute_stft_phase_features(np.ones((2, self._sim.config.AUDIO.RIR_SAMPLING_RATE)))
         return spaces.Box(
             low=np.finfo(np.float32).min,
             high=np.finfo(np.float32).max,
@@ -91,7 +91,7 @@ class SpectrogramSensor(Sensor):
             win_length = 400
             stft = np.abs(librosa.stft(signal, n_fft=n_fft, hop_length=hop_length, win_length=win_length))
             # TODO yyz
-            # stft = block_reduce(stft, block_size=(4, 4), func=np.mean)
+            stft = block_reduce(stft, block_size=(4, 4), func=np.mean)
             return stft
 
         channel1_magnitude = np.log1p(compute_stft(audio_data[0]))
@@ -101,8 +101,8 @@ class SpectrogramSensor(Sensor):
         return spectrogram
 
     def get_observation(self, *args: Any, observations, episode: Episode, **kwargs: Any):
-        # spectrogram = self._sim.get_current_spectrogram_observation(self.compute_spectrogram)
-        spectrogram = self._sim.get_current_spectrogram_observation(self.compute_stft_phase_features)
+        spectrogram = self._sim.get_current_spectrogram_observation(self.compute_spectrogram)
+        # spectrogram = self._sim.get_current_spectrogram_observation(self.compute_stft_phase_features)
         return spectrogram
 
 
