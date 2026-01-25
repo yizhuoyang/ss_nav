@@ -664,7 +664,7 @@ class PPOTrainer(BaseRLTrainer):
         if use_visual:
             beta_r = 0.2
         else:
-            beta_r = 1.0
+            beta_r = 0.2
 
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0
