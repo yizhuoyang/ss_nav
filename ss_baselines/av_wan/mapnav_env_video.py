@@ -17,7 +17,10 @@ import numpy as np
 import habitat
 import torch
 from habitat import Config, Dataset
-from habitat.utils.visualizations.utils import observations_to_image
+# from habitat.utils.visualizations.utils import observations_to_image
+from ss_baselines.common.utils import observations_to_image
+
+
 from ss_baselines.common.baseline_registry import baseline_registry
 from ss_baselines.av_wan.models.planner import Planner
 try:
@@ -111,7 +114,10 @@ class MapNavEnv(habitat.RLEnv):
         sound_map_refine   = (1-obs) * sound_map_rotate
         sound_map          = align_for_occ(sound_map_refine).T
         sound_map          = sound_map
-
+        sound_bounds = (
+                    (refiner.x_min - 0.5*refiner.res, 0.0, refiner.z_min - 0.5*refiner.res),
+                    (refiner.x_max + 0.5*refiner.res, 0.0, refiner.z_max + 0.5*refiner.res),
+                )
         if use_visual and audio_intensity ==0:
             sound_map_gaussian =sound_map
             # exp = geometric_map[:, :, 1] > 0.5  
@@ -119,8 +125,8 @@ class MapNavEnv(habitat.RLEnv):
             if vis_map is None or np.max(vis_map) <= 0:
                 refiner.P          = sound_map
             else:
-                fused = ((vis_map + 1e-6)*0.2 + 0.8*(sound_map_gaussian + 1e-6))
-                refiner.P          = fused
+                sound_map = ((vis_map + 1e-6)*0.2 + 0.8*(sound_map_gaussian + 1e-6))
+                refiner.P          = sound_map
         else:
             refiner.P          = sound_map
 
@@ -155,7 +161,7 @@ class MapNavEnv(habitat.RLEnv):
                 observation, reward, done, info = super().step({"action": action})
                 if 'intermediate' in observation:
                     for observation_rgb in observation['intermediate']:
-                        frame = observations_to_image(observation_rgb, info)
+                        frame = observations_to_image(observation_rgb, info,sound_map,sim=self._env.sim,sound_bounds=sound_bounds)
                         rgb_frames.append(frame)
                         audios.append(observation['audiogoal'])
                     del observation['intermediate']
@@ -201,7 +207,7 @@ class MapNavEnv(habitat.RLEnv):
             observation, reward, done, info = super().step({"action": action})
             if 'intermediate' in observation:
                 for observation_rgb in observation['intermediate']:
-                    frame = observations_to_image(observation_rgb, info)
+                    frame = observations_to_image(observation_rgb, info,sound_map,sim=self._env.sim,sound_bounds=sound_bounds)
                     rgb_frames.append(frame)
                     # print(len(rgb_frames))
                     audios.append(observation['audiogoal'])

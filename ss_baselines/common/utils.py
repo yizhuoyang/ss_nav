@@ -325,6 +325,8 @@ def plot_top_down_map(info, dataset='replica', pred=None, source_world=None):
         top_down_map = np.rot90(top_down_map, 1)
 
     return top_down_map
+
+
 # def plot_top_down_map(info, dataset='replica', pred=None):
 #     top_down_map = info["top_down_map"]["map"]
 #     top_down_map = maps.colorize_topdown_map(
@@ -414,13 +416,11 @@ def images_to_video_with_audio(
     video_with_new_audio = video_clip.set_audio(composite_audio_clip)
     video_with_new_audio.write_videofile(os.path.join(output_dir, video_name))
 
-
 def resize_observation(observations, model_resolution):
     for observation in observations:
         observation['rgb'] = cv2.resize(observation['rgb'], (model_resolution, model_resolution))
         observation['depth'] = np.expand_dims(cv2.resize(observation['depth'], (model_resolution, model_resolution)),
                                               axis=-1)
-
 
 def convert_semantics_to_rgb(semantics):
     r"""Converts semantic IDs to RGB images.
@@ -584,7 +584,188 @@ class NpEncoder(json.JSONEncoder):
             return super(NpEncoder, self).default(obj)
 
 
-def observations_to_image(observation: Dict, info: Dict, pred=None) -> np.ndarray:
+def normalize01(x, eps=1e-12):
+    x = x.astype(np.float32)
+    x = x - x.min()
+    x = x / (x.max() + eps)
+    return x
+
+def bilinear_sample(image, u, v, outside_value=0.0):
+    """
+    image: (Hs,Ws) float
+    u,v: (H,W) float (col,row)
+    """
+    Hs, Ws = image.shape
+    u0 = np.floor(u).astype(np.int32)
+    v0 = np.floor(v).astype(np.int32)
+    u1 = u0 + 1
+    v1 = v0 + 1
+
+    inside = (u0 >= 0) & (v0 >= 0) & (u1 < Ws) & (v1 < Hs)
+
+    u0c = np.clip(u0, 0, Ws - 1)
+    u1c = np.clip(u1, 0, Ws - 1)
+    v0c = np.clip(v0, 0, Hs - 1)
+    v1c = np.clip(v1, 0, Hs - 1)
+
+    Ia = image[v0c, u0c]
+    Ib = image[v0c, u1c]
+    Ic = image[v1c, u0c]
+    Id = image[v1c, u1c]
+
+    du = u - u0.astype(np.float32)
+    dv = v - v0.astype(np.float32)
+
+    out = ((1 - du) * (1 - dv) * Ia +
+           du * (1 - dv) * Ib +
+           (1 - du) * dv * Ic +
+           du * dv * Id).astype(np.float32)
+
+    out[~inside] = outside_value
+    return out
+
+def overlay_heat_on_rgb(img_rgb, heat01, alpha=0.45, cmap=cv2.COLORMAP_JET):
+    """
+    img_rgb: (H,W,3) uint8
+    heat01: (H,W) float [0,1]
+    """
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    heat_u8 = np.clip(heat01 * 255.0, 0, 255).astype(np.uint8)
+    heat_color = cv2.applyColorMap(heat_u8, cmap)  # BGR
+    out_bgr = cv2.addWeighted(img_bgr, 1-alpha, heat_color, alpha, 0.0)
+    return cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
+
+# =========================
+# 2) Bounds builder for 60x60 soundmap
+# =========================
+def make_sound_bounds_from_center(center_xz, map_size_m):
+    """
+    center_xz: (2,) [cx, cz]
+    map_size_m: float, soundmap 覆盖的世界长度（米），例如 60.0
+    返回 bounds: ((minx,0,minz),(maxx,0,maxz))
+    """
+    cx, cz = float(center_xz[0]), float(center_xz[1])
+    half = map_size_m * 0.5
+    minx, maxx = cx - half, cx + half
+    minz, maxz = cz - half, cz + half
+    return ((minx, 0.0, minz), (maxx, 0.0, maxz))
+
+# =========================
+# 3) Resample 60x60 sound grid -> topdown HxW
+# =========================
+def resample_sound60_to_topdown(
+    sound60, sound_bounds,
+    top_bounds, top_H, top_W,
+    flip_z_top=True, flip_z_sound=True
+):
+    """
+    sound60: (60,60) probability grid over sound_bounds
+    输出 heat: (top_H, top_W) aligned with topdown raw map pixel coords
+    """
+    sound60 = sound60.astype(np.float32)
+    Hs, Ws = sound60.shape
+    # assert Hs == 60 and Ws == 60, "soundmap should be 60x60"
+
+    (tminx, _, tminz), (tmaxx, _, tmaxz) = top_bounds
+    (sminx, _, sminz), (smaxx, _, smaxz) = sound_bounds
+
+    # top pixel -> world (x,z)
+    cols = np.linspace(0, top_W - 1, top_W, dtype=np.float32)
+    rows = np.linspace(0, top_H - 1, top_H, dtype=np.float32)
+    cc, rr = np.meshgrid(cols, rows)  # (H,W)
+
+    xw = tminx + (cc / (top_W - 1 + 1e-9)) * (tmaxx - tminx)
+    if flip_z_top:
+        zw = tmaxz - (rr / (top_H - 1 + 1e-9)) * (tmaxz - tminz)
+    else:
+        zw = tminz + (rr / (top_H - 1 + 1e-9)) * (tmaxz - tminz)
+
+    # world -> sound uv (col,row in sound grid)
+    u = (xw - sminx) / (smaxx - sminx + 1e-9) * (Ws - 1)
+    if flip_z_sound:
+        v = (smaxz - zw) / (smaxz - sminz + 1e-9) * (Hs - 1)
+    else:
+        v = (zw - sminz) / (smaxz - sminz + 1e-9) * (Hs - 1)
+
+    heat = bilinear_sample(sound60, u, v, outside_value=0.0)
+    return heat
+
+def world_to_map_rc(xz, bounds, mpp_x, mpp_z, H, W, flip_z=True):
+    (minx, _, minz), (maxx, _, maxz) = bounds
+    x = xz[..., 0]
+    z = xz[..., 1]
+    col = (x - minx) / (mpp_x + 1e-12)
+    if flip_z:
+        row = (maxz - z) / (mpp_z + 1e-12)
+    else:
+        row = (z - minz) / (mpp_z + 1e-12)
+    row = np.clip(row, 0, H - 1)
+    col = np.clip(col, 0, W - 1)
+    return np.stack([row, col], axis=-1)
+
+def pick_best_flip(world_xz_hist, map_rc_hist, bounds, mpp_x, mpp_z, H, W):
+    pred0 = world_to_map_rc(world_xz_hist, bounds, mpp_x, mpp_z, H, W, flip_z=False)
+    pred1 = world_to_map_rc(world_xz_hist, bounds, mpp_x, mpp_z, H, W, flip_z=True)
+    e0 = float(np.mean(np.linalg.norm(pred0 - map_rc_hist, axis=1)))
+    e1 = float(np.mean(np.linalg.norm(pred1 - map_rc_hist, axis=1)))
+    flip = (e1 < e0)
+    print(f"[flip_z_top] False err={e0:.3f}, True err={e1:.3f} -> use {flip}")
+    return flip
+
+# =========================
+# 5) One-call function: overlay soundmap on habitat topdown
+# =========================
+def overlay_sound60_on_topdown(
+    info, sim, render_h,
+    sound60, sound_bounds,
+    world_xz_hist=None, map_rc_hist=None,
+    alpha=0.45
+):
+    """
+    info: infos[0]
+    sim: habitat_env.sim
+    render_h: render_frame.shape[0]
+    sound60: (60,60)
+    sound_bounds: ((minx,0,minz),(maxx,0,maxz)) for soundmap
+    """
+    td = info["top_down_map"]
+    top_map_raw = td["map"]
+    H, W = top_map_raw.shape[:2]
+
+    # topdown bounds + mpp from sim.pathfinder
+    bounds = sim.pathfinder.get_bounds()
+    (minx, miny, minz), (maxx, maxy, maxz) = bounds
+    mpp_x = (maxx - minx) / float(W)
+    mpp_z = (maxz - minz) / float(H)
+
+    # auto pick flip_z_top if history provided
+    flip_z_top = False
+    if world_xz_hist is not None and map_rc_hist is not None and len(world_xz_hist) >= 3:
+        flip_z_top = pick_best_flip(world_xz_hist, map_rc_hist, bounds, mpp_x, mpp_z, H, W)
+
+    # render habitat topdown (fit to height)
+    td_rgb_fit = maps.colorize_draw_agent_and_fit_to_height(td, render_h)
+    Hfit, Wfit = td_rgb_fit.shape[:2]
+
+    # resample sound -> raw topdown size
+    heat_raw = resample_sound60_to_topdown(
+        sound60=normalize01(sound60),
+        sound_bounds=sound_bounds,
+        top_bounds=bounds,
+        top_H=H, top_W=W,
+        flip_z_top=flip_z_top,
+        flip_z_sound=False  # 如果你 soundmap 行方向相反，改 False
+    )
+    heat01_raw = normalize01(heat_raw)
+
+    # resize to fit size
+    heat01_fit = cv2.resize(heat01_raw, (Wfit, Hfit), interpolation=cv2.INTER_LINEAR)
+
+    # overlay
+    td_rgb_overlay = overlay_heat_on_rgb(td_rgb_fit, heat01_fit, alpha=alpha)
+    return td_rgb_overlay
+
+def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds=None):
     r"""Generate image of single frame from observation and info
     returned from a single environment step().
 
@@ -595,136 +776,213 @@ def observations_to_image(observation: Dict, info: Dict, pred=None) -> np.ndarra
     Returns:
         generated image of a single frame.
     """
-    egocentric_view = []
-    if "rgb" in observation:
-        observation_size = observation["rgb"].shape[0]
-        rgb = observation["rgb"]
+    render_obs_images: List[np.ndarray] = []
+    for sensor_name in observation:
+        if "rgb" in sensor_name:
+            rgb = observation[sensor_name]
+            if not isinstance(rgb, np.ndarray):
+                rgb = rgb.cpu().numpy()
+
+            render_obs_images.append(rgb)
+        elif "depth" in sensor_name:
+            depth_map = observation[sensor_name].squeeze() * 255.0
+            if not isinstance(depth_map, np.ndarray):
+                depth_map = depth_map.cpu().numpy()
+
+            depth_map = depth_map.astype(np.uint8)
+            depth_map = np.stack([depth_map for _ in range(3)], axis=2)
+            render_obs_images.append(depth_map)
+
+    # add image goal if observation has image_goal info
+    if "imagegoal" in observation:
+        rgb = observation["imagegoal"]
         if not isinstance(rgb, np.ndarray):
             rgb = rgb.cpu().numpy()
 
-        egocentric_view.append(rgb)
-
-    # draw depth map if observation has depth info
-    if "depth" in observation:
-        observation_size = observation["depth"].shape[0]
-        depth_map = observation["depth"].squeeze() * 255.0
-        if not isinstance(depth_map, np.ndarray):
-            depth_map = depth_map.cpu().numpy()
-
-        depth_map = depth_map.astype(np.uint8)
-        depth_map = np.stack([depth_map for _ in range(3)], axis=2)
-        egocentric_view.append(depth_map)
+        render_obs_images.append(rgb)
 
     assert (
-        len(egocentric_view) > 0
+        len(render_obs_images) > 0
     ), "Expected at least one visual sensor enabled."
-    egocentric_view = np.concatenate(egocentric_view, axis=1)
+
+    shapes_are_equal = len(set(x.shape for x in render_obs_images)) == 1
+    if not shapes_are_equal:
+        render_frame = tile_images(render_obs_images)
+    else:
+        render_frame = np.concatenate(render_obs_images, axis=1)
 
     # draw collision
     if "collisions" in info and info["collisions"]["is_collision"]:
-        egocentric_view = draw_collision(egocentric_view)
-
-    frame = egocentric_view
+        render_frame = draw_collision(render_frame)
 
     if "top_down_map" in info:
-        top_down_map = info["top_down_map"]["map"]
-        top_down_map = maps.colorize_topdown_map(
-            top_down_map, info["top_down_map"]["fog_of_war_mask"]
-        )
-        map_agent_pos = info["top_down_map"]["agent_map_coord"]
-        top_down_map = maps.draw_agent(
-            image=top_down_map,
-            agent_center_coord=map_agent_pos,
-            agent_rotation=info["top_down_map"]["agent_angle"],
-            agent_radius_px=top_down_map.shape[0] // 16,
-        )
-        if pred is not None:
-            from habitat.utils.geometry_utils import quaternion_rotate_vector
-
-            # current_position = sim.get_agent_state().position
-            # agent_state = sim.get_agent_state()
-            source_rotation = info["top_down_map"]["agent_rotation"]
-
-            rounded_pred = np.round(pred[1])
-            direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
-            direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
-            # pred_goal_location = source_position + direction_vector.astype(np.float32)
-
-            grid_size = (
-                (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
-                (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+        if sound_map is None or sim is None or sound_bounds is None:
+            top_down_map = info["top_down_map"]["map"]
+            top_down_map = maps.colorize_topdown_map(
+                top_down_map, info["top_down_map"]["fog_of_war_mask"]
             )
-            delta_x = int(-direction_vector[0] / grid_size[0])
-            delta_y = int(direction_vector[2] / grid_size[1])
-
-            x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
-            y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
-            point_padding = 12
-            for m in range(x - point_padding, x + point_padding + 1):
-                for n in range(y - point_padding, y + point_padding + 1):
-                    if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
-                            0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
-                        top_down_map[m, n] = (0, 255, 255)
-            if np.linalg.norm(rounded_pred) < 1:
-                assert delta_x == 0 and delta_y == 0
-
-        if top_down_map.shape[0] > top_down_map.shape[1]:
-            top_down_map = np.rot90(top_down_map, 1)
-
-        # scale top down map to align with rgb view
-        if pred is None:
-            old_h, old_w, _ = top_down_map.shape
-            top_down_height = observation_size
-            top_down_width = int(float(top_down_height) / old_h * old_w)
-            # cv2 resize (dsize is width first)
-            top_down_map = cv2.resize(
-                top_down_map.astype(np.float32),
-                (top_down_width, top_down_height),
-                interpolation=cv2.INTER_CUBIC,
+            map_agent_pos = info["top_down_map"]["agent_map_coord"]
+            top_down_map = maps.draw_agent(
+                image=top_down_map,
+                agent_center_coord=map_agent_pos,
+                agent_rotation=info["top_down_map"]["agent_angle"],
+                agent_radius_px=top_down_map.shape[0] // 16,
             )
         else:
-            # draw label
-            CATEGORY_INDEX_MAPPING = {
-                'chair': 0,
-                'table': 1,
-                'picture': 2,
-                'cabinet': 3,
-                'cushion': 4,
-                'sofa': 5,
-                'bed': 6,
-                'chest_of_drawers': 7,
-                'plant': 8,
-                'sink': 9,
-                'toilet': 10,
-                'stool': 11,
-                'towel': 12,
-                'tv_monitor': 13,
-                'shower': 14,
-                'bathtub': 15,
-                'counter': 16,
-                'fireplace': 17,
-                'gym_equipment': 18,
-                'seating': 19,
-                'clothes': 20
-            }
-            index2label = {v: k for k, v in CATEGORY_INDEX_MAPPING.items()}
-            pred_label = index2label[pred[0]]
-            text_height = int(observation_size * 0.1)
-
-            old_h, old_w, _ = top_down_map.shape
-            top_down_height = observation_size - text_height
-            top_down_width = int(float(top_down_height) / old_h * old_w)
-            # cv2 resize (dsize is width first)
-            top_down_map = cv2.resize(
-                top_down_map.astype(np.float32),
-                (top_down_width, top_down_height),
-                interpolation=cv2.INTER_CUBIC,
+            top_down_map = overlay_sound60_on_topdown(
+                info=info,
+                sim=sim,
+                render_h=render_frame.shape[0],
+                sound60=sound_map,
+                sound_bounds=sound_bounds,
+                alpha=0.5
             )
+        render_frame = np.concatenate((render_frame, top_down_map), axis=1)
 
-            top_down_map = np.concatenate(
-                [np.ones([text_height, top_down_map.shape[1], 3], dtype=np.int32) * 255, top_down_map], axis=0)
-            top_down_map = cv2.putText(top_down_map, 'C_t: ' + pred_label.replace('_', ' '), (10, text_height - 10),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 0), 2, cv2.LINE_AA)
+    return render_frame
 
-        frame = np.concatenate((egocentric_view, top_down_map), axis=1)
-    return frame
+# def observations_to_image(observation: Dict, info: Dict, pred=None) -> np.ndarray:
+#     r"""Generate image of single frame from observation and info
+#     returned from a single environment step().
+
+#     Args:
+#         observation: observation returned from an environment step().
+#         info: info returned from an environment step().
+
+#     Returns:
+#         generated image of a single frame.
+#     """
+#     egocentric_view = []
+#     if "rgb" in observation:
+#         observation_size = observation["rgb"].shape[0]
+#         rgb = observation["rgb"]
+#         if not isinstance(rgb, np.ndarray):
+#             rgb = rgb.cpu().numpy()
+
+#         egocentric_view.append(rgb)
+
+#     # draw depth map if observation has depth info
+#     if "depth" in observation:
+#         observation_size = observation["depth"].shape[0]
+#         depth_map = observation["depth"].squeeze() * 255.0
+#         if not isinstance(depth_map, np.ndarray):
+#             depth_map = depth_map.cpu().numpy()
+
+#         depth_map = depth_map.astype(np.uint8)
+#         depth_map = np.stack([depth_map for _ in range(3)], axis=2)
+#         egocentric_view.append(depth_map)
+
+#     assert (
+#         len(egocentric_view) > 0
+#     ), "Expected at least one visual sensor enabled."
+#     egocentric_view = np.concatenate(egocentric_view, axis=1)
+
+#     # draw collision 
+#     # TODO YYZ
+#     if "collisions" in info and info["collisions"]["is_collision"]:
+#         egocentric_view = draw_collision(egocentric_view)
+
+#     frame = egocentric_view
+
+#     if "top_down_map" in info:
+#         top_down_map = info["top_down_map"]["map"]
+#         top_down_map = maps.colorize_topdown_map(
+#             top_down_map, info["top_down_map"]["fog_of_war_mask"]
+#         )
+#         map_agent_pos = info["top_down_map"]["agent_map_coord"]
+#         top_down_map = maps.draw_agent(
+#             image=top_down_map,
+#             agent_center_coord=map_agent_pos,
+#             agent_rotation=info["top_down_map"]["agent_angle"],
+#             agent_radius_px=top_down_map.shape[0] // 16,
+#         )
+#         if pred is not None:
+#             from habitat.utils.geometry_utils import quaternion_rotate_vector
+
+#             # current_position = sim.get_agent_state().position
+#             # agent_state = sim.get_agent_state()
+#             source_rotation = info["top_down_map"]["agent_rotation"]
+
+#             rounded_pred = np.round(pred[1])
+#             direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
+#             direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
+#             # pred_goal_location = source_position + direction_vector.astype(np.float32)
+
+#             grid_size = (
+#                 (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+#                 (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
+#             )
+#             delta_x = int(-direction_vector[0] / grid_size[0])
+#             delta_y = int(direction_vector[2] / grid_size[1])
+
+#             x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
+#             y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
+#             point_padding = 12
+#             for m in range(x - point_padding, x + point_padding + 1):
+#                 for n in range(y - point_padding, y + point_padding + 1):
+#                     if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
+#                             0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
+#                         top_down_map[m, n] = (0, 255, 255)
+#             if np.linalg.norm(rounded_pred) < 1:
+#                 assert delta_x == 0 and delta_y == 0
+
+#         if top_down_map.shape[0] > top_down_map.shape[1]:
+#             top_down_map = np.rot90(top_down_map, 1)
+
+#         # scale top down map to align with rgb view
+#         if pred is None:
+#             old_h, old_w, _ = top_down_map.shape
+#             top_down_height = observation_size
+#             top_down_width = int(float(top_down_height) / old_h * old_w)
+#             # cv2 resize (dsize is width first)
+#             top_down_map = cv2.resize(
+#                 top_down_map.astype(np.float32),
+#                 (top_down_width, top_down_height),
+#                 interpolation=cv2.INTER_CUBIC,
+#             )
+#         else:
+#             # draw label
+#             CATEGORY_INDEX_MAPPING = {
+#                 'chair': 0,
+#                 'table': 1,
+#                 'picture': 2,
+#                 'cabinet': 3,
+#                 'cushion': 4,
+#                 'sofa': 5,
+#                 'bed': 6,
+#                 'chest_of_drawers': 7,
+#                 'plant': 8,
+#                 'sink': 9,
+#                 'toilet': 10,
+#                 'stool': 11,
+#                 'towel': 12,
+#                 'tv_monitor': 13,
+#                 'shower': 14,
+#                 'bathtub': 15,
+#                 'counter': 16,
+#                 'fireplace': 17,
+#                 'gym_equipment': 18,
+#                 'seating': 19,
+#                 'clothes': 20
+#             }
+#             index2label = {v: k for k, v in CATEGORY_INDEX_MAPPING.items()}
+#             pred_label = index2label[pred[0]]
+#             text_height = int(observation_size * 0.1)
+
+#             old_h, old_w, _ = top_down_map.shape
+#             top_down_height = observation_size - text_height
+#             top_down_width = int(float(top_down_height) / old_h * old_w)
+#             # cv2 resize (dsize is width first)
+#             top_down_map = cv2.resize(
+#                 top_down_map.astype(np.float32),
+#                 (top_down_width, top_down_height),
+#                 interpolation=cv2.INTER_CUBIC,
+#             )
+
+#             top_down_map = np.concatenate(
+#                 [np.ones([text_height, top_down_map.shape[1], 3], dtype=np.int32) * 255, top_down_map], axis=0)
+#             top_down_map = cv2.putText(top_down_map, 'C_t: ' + pred_label.replace('_', ' '), (10, text_height - 10),
+#                                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 0), 2, cv2.LINE_AA)
+
+#         frame = np.concatenate((egocentric_view, top_down_map), axis=1)
+#     return frame

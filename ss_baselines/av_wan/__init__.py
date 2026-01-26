@@ -9,11 +9,11 @@
 # from ss_baselines.av_wan.ppo.ppo_trainer_ours import PPOTrainer
 # from ss_baselines.av_wan.avwan_sensors import *
 # from ss_baselines.av_wan.mapnav_env import MapNavEnv
-from ss_baselines.av_wan.ppo.ppo_trainer_ours import PPOTrainer
-from ss_baselines.av_wan.avwan_sensors import *
-from ss_baselines.av_wan.mapnav_env import MapNavEnv
-
-
-# from ss_baselines.av_wan.ppo.ppo_trainer_ours_video import PPOTrainer
+# from ss_baselines.av_wan.ppo.ppo_trainer_ours import PPOTrainer
 # from ss_baselines.av_wan.avwan_sensors import *
-# from ss_baselines.av_wan.mapnav_env_video import MapNavEnv
+# from ss_baselines.av_wan.mapnav_env import MapNavEnv
+
+
+from ss_baselines.av_wan.ppo.ppo_trainer_ours_video import PPOTrainer
+from ss_baselines.av_wan.avwan_sensors import *
+from ss_baselines.av_wan.mapnav_env_video import MapNavEnv
