@@ -1,7 +1,7 @@
 # BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal_distractor.yaml"
 BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal.yaml"
 
-NUM_PROCESSES: 8
+NUM_PROCESSES: 1
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR"]
 NUM_UPDATES: 20000
 LOG_INTERVAL: 10

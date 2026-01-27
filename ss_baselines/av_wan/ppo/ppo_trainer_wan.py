@@ -506,6 +506,10 @@ class PPOTrainer(BaseRLTrainer):
         self.envs = construct_envs(
             config, get_env_class(config.ENV_NAME), auto_reset_done=False
         )
+
+        habitat_env = self.envs.workers[0]._env.habitat_env
+        sim = habitat_env.sim
+
         if self.config.DISPLAY_RESOLUTION != model_resolution:
             observation_space = self.envs.observation_spaces[0]
             observation_space.spaces['depth'].shape = (model_resolution, model_resolution, 1)
@@ -572,7 +576,20 @@ class PPOTrainer(BaseRLTrainer):
                 len(stats_episodes) < self.config.TEST_EPISODE_COUNT
                 and self.envs.num_envs > 0
         ):
+            habitat_env = self.envs.workers[0]._env.habitat_env
+            sim = habitat_env.sim
             current_episodes = self.envs.current_episodes()
+            object_class = current_episodes[0].object_category
+            episode_id = current_episodes[0].episode_id
+            current_scenc = current_episodes[0].scene_id
+            scene_dir = os.path.dirname(current_scenc)
+            scene_name = os.path.basename(scene_dir)
+            pose_all = observations[0]['pose']
+            state = sim.get_agent_state()
+            current_position = state.position
+            current_rotation = state.rotation
+            source_loc    = sim.graph.nodes[sim._source_position_index]['point']
+
             # print(current_episodes[0].scene_id, current_episodes[0].episode_id, self.config.TEST_EPISODE_COUNT)
             with torch.no_grad():
                 _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
@@ -587,6 +604,17 @@ class PPOTrainer(BaseRLTrainer):
 
             outputs = self.envs.step([{"action": a[0].item()} for a in actions])
             observations, rewards, dones, infos = [list(x) for x in zip(*outputs)]
+            
+            
+            save_dir = "/home/Disk/yyz/sound-spaces/vis/debug_npz_avwan"
+            save_dir = os.path.join(save_dir,f"{scene_name}_{episode_id}")
+            os.makedirs(save_dir, exist_ok=True)
+            np.savez_compressed(
+                os.path.join(save_dir, f"{pose_all[-1]}.npz"),
+                agent_pos=np.array([current_position[0],current_position[-1]])
+            )
+
+            
             if config.DISPLAY_RESOLUTION != model_resolution:
                 resize_observation(observations, model_resolution)
 
