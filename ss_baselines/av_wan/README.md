@@ -19,6 +19,8 @@ python ss_baselines/av_wan/run.py --run-type eval --exp-config ss_baselines/av_w
 
  python ss_baselines/av_wan/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_wan/config/semantic_audionav/mp3d/rgbd_ddppo.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_wan/mp3d/heard.pth TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS True TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"EGOMAP_SENSOR\",\"COLLISION\",\"POSE_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] TEST_EPISODE_COUNT 1000 EVAL.SPLIT test_distractor
 
+python ss_baselines/av_wan/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_wan/config/semantic_audionav/mp3d/rgbd_ddppo.yaml EVAL_CKPT_PATH_DIR /home/Disk/yyz/sound-spaces/data/models/mp3d/av_wan_new/data/ckpt.170.pth TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS True  TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"EGOMAP_SENSOR\",\"COLLISION\",\"POSE_SENSOR\",\"ACTION_MAP\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] TASK_CONFIG.SIMULATOR.SCENE_OBSERVATION_DIR data/scene_observations_128 EVAL.SPLIT test
+
 
 ## Citation
 If you use this model in your research, please cite the following paper:

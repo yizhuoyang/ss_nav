@@ -46,7 +46,7 @@ RL:
     reward_window_size: 50
     use_normalized_advantage: False
     policy_type: "smt"
-    use_belief_predictor: True
+    use_belief_predictor: False
     use_external_memory: True
     SCENE_MEMORY_TRANSFORMER:
       memory_size: 150
@@ -63,9 +63,10 @@ RL:
     BELIEF_PREDICTOR:
       online_training: True
       train_encoder: False
-      lr: 1e-3
+      lr: 0.001
       use_label_belief: True
       use_location_belief: True
+      pretrained_weights: "data/models/mp3d/av_wan_new/data/ckpt.175.pth"
   DDPPO:
     sync_frac: 0.6
     distrib_backend: "GLOO"

@@ -573,7 +573,7 @@ class PPOTrainer(BaseRLTrainer):
                 and self.envs.num_envs > 0
         ):
             current_episodes = self.envs.current_episodes()
-            print(current_episodes[0].scene_id, current_episodes[0].episode_id, self.config.TEST_EPISODE_COUNT)
+            # print(current_episodes[0].scene_id, current_episodes[0].episode_id, self.config.TEST_EPISODE_COUNT)
             with torch.no_grad():
                 _, actions, _, test_recurrent_hidden_states, distributions = self.actor_critic.act(
                     batch,
