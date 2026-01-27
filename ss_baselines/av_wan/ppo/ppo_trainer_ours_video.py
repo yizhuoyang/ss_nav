@@ -723,8 +723,8 @@ class PPOTrainer(BaseRLTrainer):
                     yolo_is_set = False
                     best_name = None
                     # audio_hist = AudioHistory5s(window_seconds=5.0, sr=16000)
-                    # names = [object_class]
-                    # model_yolo.set_classes(names, model_yolo.get_text_pe(names))
+                    names = [object_class]
+                    model_yolo.set_classes(names, model_yolo.get_text_pe(names))
                 # print("!!!!!!!!!!!!!!!! Reset Mapper and Refiner !!!!!!!!!!!!!!!!")
 
             spectrogram = torch.as_tensor(observations[0]['spectrogram']).permute((2,0,1)).unsqueeze(0).float().to(self.device)
@@ -754,42 +754,50 @@ class PPOTrainer(BaseRLTrainer):
             pred_doa = pred_doa.squeeze(0).detach().cpu().numpy()
             pred_r   = pred_r.squeeze(0).detach().cpu().numpy()
             if use_visual:
-                if audio_intensity <= 0:
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
-                                                                max_depth_m=10.0,
-                                                                depth_is_normalized=True,
-                                                                grid_size=100,
-                                                                map_meters=10.0)
-                    else:
-                        heat_local = np.zeros((600,600),dtype=np.float32)
-                else:
-                    query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
-                    topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
-                    best_name, locked = acc.update(topk_objs)
-                    # print("best name:",best_name,"locked:",object_class)
-                    # 4) once locked, set yolo once
-                    if locked and (best_name is not None) and (not yolo_is_set):
-                        model_yolo.set_classes(best_name, model_yolo.get_text_pe(best_name))
-                        yolo_is_set = True
+                mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                                                        max_depth_m=10.0,
+                                                        depth_is_normalized=True,
+                                                        grid_size=100,
+                                                        map_meters=10.0)
+            #     else:
+                # if audio_intensity <= 0:
+                #     if yolo_is_set:
+                #         mask = yolo_infer(model_yolo,rgb/255,device='cuda',conf=0.1)
+                #         mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                #         heat_local = mask_depth_to_binary_topdown(depth[0].detach().cpu().numpy(), mask, hfov_deg=90,
+                #                                                 max_depth_m=10.0,
+                #                                                 depth_is_normalized=True,
+                #                                                 grid_size=100,
+                #                                                 map_meters=10.0)
+                #     else:
+                #         heat_local = np.zeros((600,600),dtype=np.float32)
+                # else:
+                #     query_emb = embed_audio_whole_file(waveform, model=model_al, sr=16000, device="cuda")
+                #     topk_objs = topk_most_similar_objects(query_emb, db_path, k=3)
+                #     best_name, locked = acc.update(topk_objs)
+                #     # print("best name:",best_name,"locked:",object_class)
+                #     # 4) once locked, set yolo once
+                #     if locked and (best_name is not None) and (not yolo_is_set):
+                #         model_yolo.set_classes(best_name, model_yolo.get_text_pe(best_name))
+                #         yolo_is_set = True
 
-                    # 5) run yolo only after set
-                    if yolo_is_set:
-                        mask = yolo_infer(model_yolo, rgb/255, device="cuda", conf=0.1)
-                        mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
-                        heat_local = mask_depth_to_binary_topdown(
-                            depth[0].detach().cpu().numpy(),
-                            mask,
-                            hfov_deg=90,
-                            max_depth_m=10.0,
-                            depth_is_normalized=True,
-                            grid_size=100,
-                            map_meters=10.0
-                        )
-                    else:
-                         heat_local = np.zeros((600,600),dtype=np.float32)
+                #     # 5) run yolo only after set
+                #     if yolo_is_set:
+                #         mask = yolo_infer(model_yolo, rgb/255, device="cuda", conf=0.1)
+                #         mask = cv2.resize(mask, (depth.shape[-1], depth.shape[-2]), interpolation=cv2.INTER_NEAREST)
+                #         heat_local = mask_depth_to_binary_topdown(
+                #             depth[0].detach().cpu().numpy(),
+                #             mask,
+                #             hfov_deg=90,
+                #             max_depth_m=10.0,
+                #             depth_is_normalized=True,
+                #             grid_size=100,
+                #             map_meters=10.0
+                #         )
+                #     else:
+                #          heat_local = np.zeros((600,600),dtype=np.float32)
 
 
 
@@ -839,7 +847,7 @@ class PPOTrainer(BaseRLTrainer):
                 "agent_pos": np.array([current_position[0],current_position[-1]]),
                 "audio_intensity": audio_intensity,
                 "use_visual": use_visual,
-                "id_name": f"{scene_name}_ep{episode_id}",
+                "id_name": f"{scene_name}_{episode_id}",
                 "save_vis": save_vis,
                 "step": pose_all[-1]
                 }
@@ -939,22 +947,23 @@ class PPOTrainer(BaseRLTrainer):
                                 sound = current_episodes[i].info['sound']
                             else:
                                 sound = current_episodes[i].sound_id.split('/')[1][:-4]
-                            generate_video(
-                                video_option=self.config.VIDEO_OPTION,
-                                video_dir=self.config.VIDEO_DIR,
-                                images=rgb_frames[i][:-1],
-                                # images=infos[i]['rgb_frames'][:-1],
-                                scene_name=current_episodes[i].scene_id.split('/')[3],
-                                sound=sound,
-                                sr=self.config.TASK_CONFIG.SIMULATOR.AUDIO.RIR_SAMPLING_RATE,
-                                episode_id=current_episodes[i].episode_id,
-                                checkpoint_idx=checkpoint_index,
-                                metric_name='spl',
-                                metric_value=infos[i]['spl'],
-                                tb_writer=writer,
-                                audios=audios[i][:-1],
-                                fps=fps
-                            )
+                            if infos[i]['distance_to_goal']<1.0:
+                                generate_video(
+                                    video_option=self.config.VIDEO_OPTION,
+                                    video_dir=self.config.VIDEO_DIR,
+                                    images=rgb_frames[i][:-1],
+                                    # images=infos[i]['rgb_frames'][:-1],
+                                    scene_name=current_episodes[i].scene_id.split('/')[3],
+                                    sound=sound,
+                                    sr=self.config.TASK_CONFIG.SIMULATOR.AUDIO.RIR_SAMPLING_RATE,
+                                    episode_id=current_episodes[i].episode_id,
+                                    checkpoint_idx=checkpoint_index,
+                                    metric_name='spl',
+                                    metric_value=infos[i]['spl'],
+                                    tb_writer=writer,
+                                    audios=audios[i][:-1],
+                                    fps=fps
+                                )
 
                         rgb_frames[i] = []
                         audios[i] = []

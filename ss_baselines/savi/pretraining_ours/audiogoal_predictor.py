@@ -168,95 +168,10 @@ class SpecEncoderGlobal(nn.Module):
         x = self.fc(x)            # -> (B, out_dim)
         return x
 
-# class AudioGoalPredictor(nn.Module):
-#     def __init__(self, predict_label=True, predict_location=True):
-#         super(AudioGoalPredictor, self).__init__()
-#         self.input_shape_printed = False
-#         self.spec_encoder = SpecEncoderGlobal(
-#             in_channels=2,
-#             channels=(16, 32, 64),
-#             dropout=0.3,
-#             out_dim=256,
-#             use_compress=False
-#         )
-
-#         self.depth_encoder = DepthResNet18Encoder(
-#             out_dim=64,
-#             pretrained=True,
-#         )
-
-#         for p in self.depth_encoder.features.parameters():
-#             p.requires_grad = False
-
-#         self.film_gamma = nn.Linear(64, 256)
-#         self.film_beta  = nn.Linear(64, 256)
-
-#         self.fusion_fc = nn.Sequential(
-#             nn.Linear(256, 256),
-#             nn.ReLU(inplace=True),
-#             nn.Dropout(0.1),
-#         )
-
-#         self.doa_head = nn.Sequential(
-#             nn.Linear(256, 128),
-#             nn.ReLU(inplace=True),
-#             nn.Dropout(0.3),
-#             nn.Linear(128, 360),
-#         )
-#         # self.num_distance_bins = num_distance_bins
-#         self.distance_head = nn.Sequential(
-#             nn.Linear(256, 128),
-#             nn.ReLU(inplace=True),
-#             nn.Dropout(0.3),
-#             nn.Linear(128, 120),
-#         )
-#         self.drop_depth_prob = 0.5
-
-#     def forward(self, audio_feature):
-#         if not self.input_shape_printed:
-#             logging.info('Audiogoal predictor input audio feature shape: {}'.format(audio_feature["spectrogram"].shape))
-#             self.input_shape_printed = True
-#         audio_observations = audio_feature['spectrogram']
-#         depth_observations = audio_feature['depth']
-#         if not torch.is_tensor(audio_observations):
-#             audio_observations = torch.from_numpy(audio_observations).to(device='cuda:0').unsqueeze(0)
-#             depth_observations = torch.from_numpy(depth_observations).to(device='cuda:0').unsqueeze(0)
-
-#         audio_observations = audio_observations.permute(0, 3, 1, 2)
-#         spec_feat = self.spec_encoder(audio_observations)
-
-#         depth_feat = self.depth_encoder(depth_observations) 
-
-#         if self.training and torch.rand(1).item() < self.drop_depth_prob:
-#             depth_feat = torch.zeros_like(depth_feat)
-
-#         gamma = self.film_gamma(depth_feat)            # (B, spec_out_dim)
-#         beta  = self.film_beta(depth_feat)             # (B, spec_out_dim)
-
-#         gamma = 1.0 + 0.1 * torch.tanh(gamma)
-#         beta  = 0.1 * torch.tanh(beta)
-
-#         spec_film = gamma * spec_feat + beta           # (B, spec_out_dim)
-
-#         out_feat = self.fusion_fc(spec_film)           # (B, fusion_out_dim)
-
-#         # TODO
-#         doa_logits = self.doa_head(out_feat)
-#         doa_logits = torch.sigmoid(doa_logits)
-
-#         distance_logits = self.distance_head(out_feat)
-#         distance_logits = torch.sigmoid(distance_logits)
-
-#         return doa_logits, distance_logits
-        # return self.predictor(audio_observations)
-
-
-
 class AudioGoalPredictor(nn.Module):
     def __init__(self, predict_label=True, predict_location=True):
         super(AudioGoalPredictor, self).__init__()
         self.input_shape_printed = False
-
         self.spec_encoder = SpecEncoderGlobal(
             in_channels=2,
             channels=(16, 32, 64),
@@ -270,23 +185,17 @@ class AudioGoalPredictor(nn.Module):
             pretrained=True,
         )
 
-        # 冻结 depth backbone（按你原来的逻辑）
         for p in self.depth_encoder.features.parameters():
             p.requires_grad = False
 
-        # ====== 替代 FiLM：depth -> 1x1 conv -> tile -> concat ======
-        # depth_feat: (B,64) 或 (B,64,Hd,Wd)
-        self.depth_proj_1x1 = nn.Conv2d(64, 256, kernel_size=1, bias=True)
+        self.film_gamma = nn.Linear(64, 256)
+        self.film_beta  = nn.Linear(64, 256)
 
-        # concat 后 512 -> 256
-        self.fuse_1x1 = nn.Sequential(
-            nn.Conv2d(512, 256, kernel_size=1, bias=True),
+        self.fusion_fc = nn.Sequential(
+            nn.Linear(256, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
         )
-
-        # 如果最后是 feature map，这里做全局池化得到 (B,256)
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.doa_head = nn.Sequential(
             nn.Linear(256, 128),
@@ -294,76 +203,167 @@ class AudioGoalPredictor(nn.Module):
             nn.Dropout(0.3),
             nn.Linear(128, 360),
         )
-
+        # self.num_distance_bins = num_distance_bins
         self.distance_head = nn.Sequential(
             nn.Linear(256, 128),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
             nn.Linear(128, 120),
         )
-
         self.drop_depth_prob = 0.5
-
-    def _ensure_4d(self, x):
-        """
-        把 (B,C) 变成 (B,C,1,1)，保留 (B,C,H,W) 不变
-        """
-        if x.ndim == 2:
-            return x.unsqueeze(-1).unsqueeze(-1)
-        return x
 
     def forward(self, audio_feature):
         if not self.input_shape_printed:
-            logging.info(
-                'Audiogoal predictor input audio feature shape: {}'.format(
-                    audio_feature["spectrogram"].shape
-                )
-            )
+            logging.info('Audiogoal predictor input audio feature shape: {}'.format(audio_feature["spectrogram"].shape))
             self.input_shape_printed = True
+        audio_observations = audio_feature['spectrogram']
+        depth_observations = audio_feature['depth']
+        if not torch.is_tensor(audio_observations):
+            audio_observations = torch.from_numpy(audio_observations).to(device='cuda:0').unsqueeze(0)
+            depth_observations = torch.from_numpy(depth_observations).to(device='cuda:0').unsqueeze(0)
 
-        audio_obs = audio_feature['spectrogram']
-        depth_obs = audio_feature['depth']
+        audio_observations = audio_observations.permute(0, 3, 1, 2)
+        spec_feat = self.spec_encoder(audio_observations)
 
-        if not torch.is_tensor(audio_obs):
-            # 你这里写死 cuda:0 我保留，但更推荐用 next(self.parameters()).device
-            audio_obs = torch.from_numpy(audio_obs).to(device='cuda:0').unsqueeze(0)
-            depth_obs = torch.from_numpy(depth_obs).to(device='cuda:0').unsqueeze(0)
+        depth_feat = self.depth_encoder(depth_observations) 
 
-        # spectrogram: (B,H,W,C=2) -> (B,2,H,W)
-        audio_obs = audio_obs.permute(0, 3, 1, 2)
-
-        # spec_feat: 可能是 (B,256) 或 (B,256,Hs,Ws)
-        spec_feat = self.spec_encoder(audio_obs)
-        spec_feat_4d = self._ensure_4d(spec_feat)  # -> (B,256,Hs,Ws) or (B,256,1,1)
-
-        # depth_feat: 你 DepthResNet18Encoder 目前 forward 输出大概率是 (B,64)
-        depth_feat = self.depth_encoder(depth_obs)
-        depth_feat_4d = self._ensure_4d(depth_feat)  # -> (B,64,1,1) 或 (B,64,Hd,Wd)
-
-        # 训练时随机丢 depth
         if self.training and torch.rand(1).item() < self.drop_depth_prob:
-            depth_feat_4d = torch.zeros_like(depth_feat_4d)
+            depth_feat = torch.zeros_like(depth_feat)
 
-        # 1x1 conv: (B,64,*,*) -> (B,256,*,*)
-        depth_proj = self.depth_proj_1x1(depth_feat_4d)
+        gamma = self.film_gamma(depth_feat)            # (B, spec_out_dim)
+        beta  = self.film_beta(depth_feat)             # (B, spec_out_dim)
 
-        # tile/resize depth 到 spec 的空间尺寸
-        Hs, Ws = spec_feat_4d.shape[-2], spec_feat_4d.shape[-1]
-        if depth_proj.shape[-2:] != (Hs, Ws):
-            # 如果 depth 是 (1,1) 就会被上采样；如果 depth 有自己的 feature map，也会对齐
-            depth_proj = F.interpolate(depth_proj, size=(Hs, Ws), mode="nearest")
+        gamma = 1.0 + 0.1 * torch.tanh(gamma)
+        beta  = 0.1 * torch.tanh(beta)
 
-        # concat 融合： (B,256,Hs,Ws) + (B,256,Hs,Ws) -> (B,512,Hs,Ws) -> (B,256,Hs,Ws)
-        fused_map = self.fuse_1x1(torch.cat([spec_feat_4d, depth_proj], dim=1))
+        spec_film = gamma * spec_feat + beta           # (B, spec_out_dim)
 
-        # pool -> (B,256)
-        fused_feat = self.pool(fused_map).flatten(1)
+        out_feat = self.fusion_fc(spec_film)           # (B, fusion_out_dim)
 
-        # heads（用 fused_feat，不要再用 spec_feat）
-        doa_logits = torch.sigmoid(self.doa_head(fused_feat))
-        distance_logits = torch.sigmoid(self.distance_head(fused_feat))
+        # TODO
+        doa_logits = self.doa_head(out_feat)
+        doa_logits = torch.sigmoid(doa_logits)
+
+        distance_logits = self.distance_head(out_feat)
+        distance_logits = torch.sigmoid(distance_logits)
 
         return doa_logits, distance_logits
+        return self.predictor(audio_observations)
+
+
+
+# class AudioGoalPredictor(nn.Module):
+#     def __init__(self, predict_label=True, predict_location=True):
+#         super(AudioGoalPredictor, self).__init__()
+#         self.input_shape_printed = False
+
+#         self.spec_encoder = SpecEncoderGlobal(
+#             in_channels=2,
+#             channels=(16, 32, 64),
+#             dropout=0.3,
+#             out_dim=256,
+#             use_compress=False
+#         )
+
+#         self.depth_encoder = DepthResNet18Encoder(
+#             out_dim=64,
+#             pretrained=True,
+#         )
+
+#         # 冻结 depth backbone（按你原来的逻辑）
+#         for p in self.depth_encoder.features.parameters():
+#             p.requires_grad = False
+
+#         # ====== 替代 FiLM：depth -> 1x1 conv -> tile -> concat ======
+#         # depth_feat: (B,64) 或 (B,64,Hd,Wd)
+#         self.depth_proj_1x1 = nn.Conv2d(64, 256, kernel_size=1, bias=True)
+
+#         # concat 后 512 -> 256
+#         self.fuse_1x1 = nn.Sequential(
+#             nn.Conv2d(512, 256, kernel_size=1, bias=True),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(0.1),
+#         )
+
+#         # 如果最后是 feature map，这里做全局池化得到 (B,256)
+#         self.pool = nn.AdaptiveAvgPool2d((1, 1))
+
+#         self.doa_head = nn.Sequential(
+#             nn.Linear(256, 128),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(0.3),
+#             nn.Linear(128, 360),
+#         )
+
+#         self.distance_head = nn.Sequential(
+#             nn.Linear(256, 128),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(0.3),
+#             nn.Linear(128, 120),
+#         )
+
+#         self.drop_depth_prob = 0.5
+
+#     def _ensure_4d(self, x):
+#         """
+#         把 (B,C) 变成 (B,C,1,1)，保留 (B,C,H,W) 不变
+#         """
+#         if x.ndim == 2:
+#             return x.unsqueeze(-1).unsqueeze(-1)
+#         return x
+
+#     def forward(self, audio_feature):
+#         if not self.input_shape_printed:
+#             logging.info(
+#                 'Audiogoal predictor input audio feature shape: {}'.format(
+#                     audio_feature["spectrogram"].shape
+#                 )
+#             )
+#             self.input_shape_printed = True
+
+#         audio_obs = audio_feature['spectrogram']
+#         depth_obs = audio_feature['depth']
+
+#         if not torch.is_tensor(audio_obs):
+#             # 你这里写死 cuda:0 我保留，但更推荐用 next(self.parameters()).device
+#             audio_obs = torch.from_numpy(audio_obs).to(device='cuda:0').unsqueeze(0)
+#             depth_obs = torch.from_numpy(depth_obs).to(device='cuda:0').unsqueeze(0)
+
+#         # spectrogram: (B,H,W,C=2) -> (B,2,H,W)
+#         audio_obs = audio_obs.permute(0, 3, 1, 2)
+
+#         # spec_feat: 可能是 (B,256) 或 (B,256,Hs,Ws)
+#         spec_feat = self.spec_encoder(audio_obs)
+#         spec_feat_4d = self._ensure_4d(spec_feat)  # -> (B,256,Hs,Ws) or (B,256,1,1)
+
+#         # depth_feat: 你 DepthResNet18Encoder 目前 forward 输出大概率是 (B,64)
+#         depth_feat = self.depth_encoder(depth_obs)
+#         depth_feat_4d = self._ensure_4d(depth_feat)  # -> (B,64,1,1) 或 (B,64,Hd,Wd)
+
+#         # 训练时随机丢 depth
+#         if self.training and torch.rand(1).item() < self.drop_depth_prob:
+#             depth_feat_4d = torch.zeros_like(depth_feat_4d)
+
+#         # 1x1 conv: (B,64,*,*) -> (B,256,*,*)
+#         depth_proj = self.depth_proj_1x1(depth_feat_4d)
+
+#         # tile/resize depth 到 spec 的空间尺寸
+#         Hs, Ws = spec_feat_4d.shape[-2], spec_feat_4d.shape[-1]
+#         if depth_proj.shape[-2:] != (Hs, Ws):
+#             # 如果 depth 是 (1,1) 就会被上采样；如果 depth 有自己的 feature map，也会对齐
+#             depth_proj = F.interpolate(depth_proj, size=(Hs, Ws), mode="nearest")
+
+#         # concat 融合： (B,256,Hs,Ws) + (B,256,Hs,Ws) -> (B,512,Hs,Ws) -> (B,256,Hs,Ws)
+#         fused_map = self.fuse_1x1(torch.cat([spec_feat_4d, depth_proj], dim=1))
+
+#         # pool -> (B,256)
+#         fused_feat = self.pool(fused_map).flatten(1)
+
+#         # heads（用 fused_feat，不要再用 spec_feat）
+#         doa_logits = torch.sigmoid(self.doa_head(fused_feat))
+#         distance_logits = torch.sigmoid(self.distance_head(fused_feat))
+
+#         return doa_logits, distance_logits
 
 
 class AudioGoalPredictor_infer(nn.Module):

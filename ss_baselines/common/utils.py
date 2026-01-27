@@ -24,7 +24,8 @@ import torch.nn.functional as f
 import moviepy.editor as mpy
 from gym.spaces import Box
 from moviepy.audio.AudioClip import CompositeAudioClip, AudioArrayClip
-
+import moviepy.editor as mpy
+from moviepy.audio.AudioClip import AudioArrayClip
 from habitat.utils.visualizations.utils import images_to_video
 from habitat import logger
 from habitat_sim.utils.common import d3_40_colors_rgb
@@ -181,6 +182,152 @@ def poll_checkpoint_folder(
         return models_paths[ind]
     return None
 
+def ensure_2T(audio: np.ndarray) -> np.ndarray:
+    """Return (2,T) float32. Accept (2,T) or (T,2)."""
+    a = np.asarray(audio)
+    if a.ndim == 1:
+        raise ValueError("audio is (T,), but stereo (2,T) is required.")
+    if a.shape[0] == 2:
+        return a.astype(np.float32)
+    if a.shape[-1] == 2:
+        return a.T.astype(np.float32)
+    raise ValueError(f"Unsupported audio shape {a.shape}, expected (2,T) or (T,2).")
+
+
+def make_stereo_waveform_panel(
+    audio_2T: np.ndarray,    # (2, Tseg)
+    panel_h: int,
+    panel_w: int,
+    pad: int = 12,
+    gain: float = 1.0,
+    ch_names=("L", "R"),
+    show_grid: bool = True,
+) -> np.ndarray:
+    """
+    Create an RGB panel visualizing stereo waveforms (no RMS).
+    Top half: ch0, bottom half: ch1.
+    """
+    panel_bgr = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
+
+    a = ensure_2T(audio_2T) * float(gain)
+    a0, a1 = a[0], a[1]
+
+    def _norm(y):
+        peak = float(np.max(np.abs(y)) + 1e-9)
+        return (y / peak).astype(np.float32)
+
+    y0 = _norm(a0)
+    y1 = _norm(a1)
+
+    def _resample(y):
+        if y.size <= 1:
+            return np.zeros((panel_w,), np.float32)
+        xs = np.linspace(0, y.size - 1, panel_w).astype(np.int32)
+        return y[xs]
+
+    y0w = _resample(y0)
+    y1w = _resample(y1)
+
+    h_half = panel_h // 2
+    mid0 = h_half // 2
+    mid1 = h_half + (h_half // 2)
+    amp0 = (h_half // 2) - pad
+    amp1 = (h_half // 2) - pad
+
+    if show_grid:
+        # vertical grid
+        step = max(1, panel_w // 10)
+        for x in range(0, panel_w, step):
+            cv2.line(panel_bgr, (x, 0), (x, panel_h - 1), (35, 35, 35), 1)
+        # separator
+        cv2.line(panel_bgr, (0, h_half), (panel_w - 1, h_half), (55, 55, 55), 1)
+
+    # midlines
+    cv2.line(panel_bgr, (0, mid0), (panel_w - 1, mid0), (75, 75, 75), 1)
+    cv2.line(panel_bgr, (0, mid1), (panel_w - 1, mid1), (75, 75, 75), 1)
+
+    col0 = (220, 220, 220)   # ch0
+    col1 = (200, 230, 255)   # ch1 (slightly blue-ish)
+
+    for x in range(panel_w):
+        v0 = float(y0w[x])
+        y_top0 = int(mid0 - v0 * amp0)
+        y_bot0 = int(mid0 + v0 * amp0)
+        cv2.line(panel_bgr, (x, y_top0), (x, y_bot0), col0, 1)
+
+        v1 = float(y1w[x])
+        y_top1 = int(mid1 - v1 * amp1)
+        y_bot1 = int(mid1 + v1 * amp1)
+        cv2.line(panel_bgr, (x, y_top1), (x, y_bot1), col1, 1)
+
+    # labels
+    cv2.putText(panel_bgr, str(ch_names[0]), (pad, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (210, 210, 210), 1)
+    cv2.putText(panel_bgr, str(ch_names[1]), (pad, h_half + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (210, 210, 210), 1)
+
+    return cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2RGB)
+
+
+def images_to_video_with_stereo_audio_and_top_vis(
+    images,                 # List[np.ndarray] RGB HxWx3
+    output_dir: str,
+    video_name: str,
+    audios,                 # List[np.ndarray] (2,T) or (T,2)
+    sr: int,
+    fps: int = 1,
+    multiplier: float = 0.5,
+    top_panel_h: int = 90,   # audio panel height on top
+    gain: float = 1.0,
+    ch_names=("L", "R"),
+):
+    """
+    - 不遮挡原图：把 audio waveform 画在上方 panel，再拼到原图上方
+    - 不显示 RMS
+    - 音频双通道写入视频
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    video_name = video_name.replace(" ", "_").replace("\n", "_") + ".mp4"
+
+    assert len(images) == len(audios), "images and audios must have same length"
+    seg_len = int(sr * (1.0 / fps))
+
+    out_frames = []
+    audio_clips = []
+
+    for i, frame in enumerate(images):
+        frame_rgb = frame.copy()
+        H, W = frame_rgb.shape[:2]
+
+        a = ensure_2T(audios[i])  # (2,T)
+        a_seg = a[:, :seg_len]
+        if a_seg.shape[1] < seg_len:
+            a_seg = np.pad(a_seg, ((0, 0), (0, seg_len - a_seg.shape[1])), mode="constant")
+
+        # ---- top waveform panel (match width W) ----
+        panel_rgb = make_stereo_waveform_panel(
+            audio_2T=a_seg,
+            panel_h=int(top_panel_h),
+            panel_w=int(W),
+            gain=gain,
+            ch_names=ch_names,
+            show_grid=True,
+        )
+
+        merged = np.concatenate([panel_rgb, frame_rgb], axis=0)  # stack vertically
+        out_frames.append(merged)
+
+        # ---- audio clip (stereo) ----
+        a_T2 = (a_seg * float(multiplier)).astype(np.float32).T  # (T,2) for moviepy
+        clip = AudioArrayClip(a_T2, fps=sr).set_start((1.0 / fps) * i)
+        audio_clips.append(clip)
+
+    composite_audio = CompositeAudioClip(audio_clips)
+    video_clip = mpy.ImageSequenceClip(out_frames, fps=fps)
+    video_with_audio = video_clip.set_audio(composite_audio)
+
+    out_path = os.path.join(output_dir, video_name)
+    video_with_audio.write_videofile(out_path, fps=fps)
+    print("[OK]", out_path)
+
 
 def generate_video(
     video_option: List[str],
@@ -222,7 +369,8 @@ def generate_video(
         if audios is None:
             images_to_video(images, video_dir, video_name)
         else:
-            images_to_video_with_audio(images, video_dir, video_name, audios, sr, fps=fps)
+            # images_to_video_with_audio(images, video_dir, video_name, audios, sr, fps=fps)
+            images_to_video_with_stereo_audio_and_top_vis(images, video_dir, video_name, audios, sr, fps=fps)
     if "tensorboard" in video_option:
         tb_writer.add_video_from_np_images(
             f"episode{episode_id}", checkpoint_idx, images, fps=fps
@@ -325,55 +473,6 @@ def plot_top_down_map(info, dataset='replica', pred=None, source_world=None):
         top_down_map = np.rot90(top_down_map, 1)
 
     return top_down_map
-
-
-# def plot_top_down_map(info, dataset='replica', pred=None):
-#     top_down_map = info["top_down_map"]["map"]
-#     top_down_map = maps.colorize_topdown_map(
-#         top_down_map, info["top_down_map"]["fog_of_war_mask"]
-#     )
-#     map_agent_pos = info["top_down_map"]["agent_map_coord"]
-#     if dataset == 'replica':
-#         agent_radius_px = top_down_map.shape[0] // 16
-#     else:
-#         agent_radius_px = top_down_map.shape[0] // 50
-#     top_down_map = maps.draw_agent(
-#         image=top_down_map,
-#         agent_center_coord=map_agent_pos,
-#         agent_rotation=info["top_down_map"]["agent_angle"],
-#         agent_radius_px=agent_radius_px
-#     )
-#     if pred is not None:
-#         from habitat.utils.geometry_utils import quaternion_rotate_vector
-#
-#         source_rotation = info["top_down_map"]["agent_rotation"]
-#
-#         rounded_pred = np.round(pred[1])
-#         direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
-#         direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
-#
-#         grid_size = (
-#             (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
-#             (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
-#         )
-#         delta_x = int(-direction_vector[0] / grid_size[0])
-#         delta_y = int(direction_vector[2] / grid_size[1])
-#
-#         x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
-#         y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
-#         point_padding = 20
-#         for m in range(x - point_padding, x + point_padding + 1):
-#             for n in range(y - point_padding, y + point_padding + 1):
-#                 if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
-#                         0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
-#                     top_down_map[m, n] = (0, 255, 255)
-#         if np.linalg.norm(rounded_pred) < 1:
-#             assert delta_x == 0 and delta_y == 0
-#
-#     if top_down_map.shape[0] > top_down_map.shape[1]:
-#         top_down_map = np.rot90(top_down_map, 1)
-#     return top_down_map
-
 
 def images_to_video_with_audio(
     images: List[np.ndarray],
@@ -635,9 +734,6 @@ def overlay_heat_on_rgb(img_rgb, heat01, alpha=0.45, cmap=cv2.COLORMAP_JET):
     out_bgr = cv2.addWeighted(img_bgr, 1-alpha, heat_color, alpha, 0.0)
     return cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
 
-# =========================
-# 2) Bounds builder for 60x60 soundmap
-# =========================
 def make_sound_bounds_from_center(center_xz, map_size_m):
     """
     center_xz: (2,) [cx, cz]
@@ -650,9 +746,6 @@ def make_sound_bounds_from_center(center_xz, map_size_m):
     minz, maxz = cz - half, cz + half
     return ((minx, 0.0, minz), (maxx, 0.0, maxz))
 
-# =========================
-# 3) Resample 60x60 sound grid -> topdown HxW
-# =========================
 def resample_sound60_to_topdown(
     sound60, sound_bounds,
     top_bounds, top_H, top_W,
@@ -712,9 +805,6 @@ def pick_best_flip(world_xz_hist, map_rc_hist, bounds, mpp_x, mpp_z, H, W):
     print(f"[flip_z_top] False err={e0:.3f}, True err={e1:.3f} -> use {flip}")
     return flip
 
-# =========================
-# 5) One-call function: overlay soundmap on habitat topdown
-# =========================
 def overlay_sound60_on_topdown(
     info, sim, render_h,
     sound60, sound_bounds,
@@ -765,7 +855,97 @@ def overlay_sound60_on_topdown(
     td_rgb_overlay = overlay_heat_on_rgb(td_rgb_fit, heat01_fit, alpha=alpha)
     return td_rgb_overlay
 
-def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds=None):
+
+def _ensure_xyz(pos):
+    """Accept (3,) xyz or (2,) xz, return (x,y,z)."""
+    if pos is None:
+        return None
+    p = np.asarray(pos, dtype=np.float32).reshape(-1)
+    if p.size == 3:
+        return p
+    if p.size == 2:
+        return np.array([p[0], 0.0, p[1]], dtype=np.float32)
+    raise ValueError(f"pos must be (3,) or (2,), got shape {p.shape}")
+
+def world_to_topdown_rc(world_pos, sim, H, W, flip_z=True):
+    """
+    world_pos: (x,y,z) or (x,z)
+    return: (row, col) int
+    """
+    p = _ensure_xyz(world_pos)
+    bounds = sim.pathfinder.get_bounds()
+    (minx, _, minz), (maxx, _, maxz) = bounds
+
+    x, z = float(p[0]), float(p[2])
+
+    col = (x - minx) / (maxx - minx + 1e-9) * (W - 1)
+    if flip_z:
+        row = (maxz - z) / (maxz - minz + 1e-9) * (H - 1)
+    else:
+        row = (z - minz) / (maxz - minz + 1e-9) * (H - 1)
+
+    r = int(np.clip(np.round(row), 0, H - 1))
+    c = int(np.clip(np.round(col), 0, W - 1))
+    return (r, c)
+
+def draw_filled_star_bgr(img_bgr, center_xy, outer_r=10, inner_r=None, color=(0,0,255), rotation_deg=-90):
+    """
+    在 BGR 图上画填充五角星
+    center_xy: (x,y) = (col,row)
+    color: BGR (红色是 (0,0,255))
+    """
+    if inner_r is None:
+        inner_r = int(outer_r * 0.5)
+
+    cx, cy = center_xy
+    pts = []
+    # 10 个点交替外/内
+    for k in range(10):
+        ang = np.deg2rad(rotation_deg + k * 36.0)
+        r = outer_r if (k % 2 == 0) else inner_r
+        x = cx + r * np.cos(ang)
+        y = cy + r * np.sin(ang)
+        pts.append([x, y])
+
+    pts = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
+    cv2.fillPoly(img_bgr, [pts], color)
+
+def draw_goal_pred_on_topdown(
+    topdown_rgb,
+    sim,
+    gt_position=None,      # world (x,y,z) or (x,z)
+    pred_position=None,    # world (x,y,z) or (x,z)
+    flip_z=True,
+    star_outer_r=10,
+    pred_radius=7,
+):
+    """
+    GT: 红色五角星
+    Pred: 绿色圆
+    """
+    img_bgr = cv2.cvtColor(topdown_rgb, cv2.COLOR_RGB2BGR)
+    H, W = img_bgr.shape[:2]
+
+    # --- GT star (red) ---
+    if gt_position is not None:
+        r, c = world_to_topdown_rc(gt_position, sim, H, W, flip_z=flip_z)
+        draw_filled_star_bgr(
+            img_bgr,
+            center_xy=(c, r),
+            outer_r=star_outer_r,
+            inner_r=int(star_outer_r * 0.5),
+            color=(0, 0, 255),   # red (BGR)
+            rotation_deg=-90
+        )
+
+    # # --- Pred circle (green) ---
+    # if pred_position is not None:
+    #     r, c = world_to_topdown_rc(pred_position, sim, H, W, flip_z=flip_z)
+    #     cv2.circle(img_bgr, (c, r), int(pred_radius), (0, 180, 0), -1)  # darker green
+
+    return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds=None,goal_position=None,pred_position=None):
     r"""Generate image of single frame from observation and info
     returned from a single environment step().
 
@@ -816,7 +996,7 @@ def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds
         render_frame = draw_collision(render_frame)
 
     if "top_down_map" in info:
-        if sound_map is None or sim is None or sound_bounds is None:
+        if sound_map is None or sim is None or sound_bounds is None or goal_position is None or pred_position is None:
             top_down_map = info["top_down_map"]["map"]
             top_down_map = maps.colorize_topdown_map(
                 top_down_map, info["top_down_map"]["fog_of_war_mask"]
@@ -837,152 +1017,16 @@ def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds
                 sound_bounds=sound_bounds,
                 alpha=0.5
             )
+            top_down_map = draw_goal_pred_on_topdown(
+            topdown_rgb=top_down_map,
+            sim=sim,
+            gt_position=goal_position,     
+            pred_position=pred_position, 
+            flip_z=False,                 
+            star_outer_r=10,
+            pred_radius=7,
+        )
         render_frame = np.concatenate((render_frame, top_down_map), axis=1)
 
     return render_frame
 
-# def observations_to_image(observation: Dict, info: Dict, pred=None) -> np.ndarray:
-#     r"""Generate image of single frame from observation and info
-#     returned from a single environment step().
-
-#     Args:
-#         observation: observation returned from an environment step().
-#         info: info returned from an environment step().
-
-#     Returns:
-#         generated image of a single frame.
-#     """
-#     egocentric_view = []
-#     if "rgb" in observation:
-#         observation_size = observation["rgb"].shape[0]
-#         rgb = observation["rgb"]
-#         if not isinstance(rgb, np.ndarray):
-#             rgb = rgb.cpu().numpy()
-
-#         egocentric_view.append(rgb)
-
-#     # draw depth map if observation has depth info
-#     if "depth" in observation:
-#         observation_size = observation["depth"].shape[0]
-#         depth_map = observation["depth"].squeeze() * 255.0
-#         if not isinstance(depth_map, np.ndarray):
-#             depth_map = depth_map.cpu().numpy()
-
-#         depth_map = depth_map.astype(np.uint8)
-#         depth_map = np.stack([depth_map for _ in range(3)], axis=2)
-#         egocentric_view.append(depth_map)
-
-#     assert (
-#         len(egocentric_view) > 0
-#     ), "Expected at least one visual sensor enabled."
-#     egocentric_view = np.concatenate(egocentric_view, axis=1)
-
-#     # draw collision 
-#     # TODO YYZ
-#     if "collisions" in info and info["collisions"]["is_collision"]:
-#         egocentric_view = draw_collision(egocentric_view)
-
-#     frame = egocentric_view
-
-#     if "top_down_map" in info:
-#         top_down_map = info["top_down_map"]["map"]
-#         top_down_map = maps.colorize_topdown_map(
-#             top_down_map, info["top_down_map"]["fog_of_war_mask"]
-#         )
-#         map_agent_pos = info["top_down_map"]["agent_map_coord"]
-#         top_down_map = maps.draw_agent(
-#             image=top_down_map,
-#             agent_center_coord=map_agent_pos,
-#             agent_rotation=info["top_down_map"]["agent_angle"],
-#             agent_radius_px=top_down_map.shape[0] // 16,
-#         )
-#         if pred is not None:
-#             from habitat.utils.geometry_utils import quaternion_rotate_vector
-
-#             # current_position = sim.get_agent_state().position
-#             # agent_state = sim.get_agent_state()
-#             source_rotation = info["top_down_map"]["agent_rotation"]
-
-#             rounded_pred = np.round(pred[1])
-#             direction_vector_agent = np.array([rounded_pred[1], 0, -rounded_pred[0]])
-#             direction_vector = quaternion_rotate_vector(source_rotation, direction_vector_agent)
-#             # pred_goal_location = source_position + direction_vector.astype(np.float32)
-
-#             grid_size = (
-#                 (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
-#                 (maps.COORDINATE_MAX - maps.COORDINATE_MIN) / 10000,
-#             )
-#             delta_x = int(-direction_vector[0] / grid_size[0])
-#             delta_y = int(direction_vector[2] / grid_size[1])
-
-#             x = np.clip(map_agent_pos[0] + delta_x, a_min=0, a_max=top_down_map.shape[0])
-#             y = np.clip(map_agent_pos[1] + delta_y, a_min=0, a_max=top_down_map.shape[1])
-#             point_padding = 12
-#             for m in range(x - point_padding, x + point_padding + 1):
-#                 for n in range(y - point_padding, y + point_padding + 1):
-#                     if np.linalg.norm(np.array([m - x, n - y])) <= point_padding and \
-#                             0 <= m < top_down_map.shape[0] and 0 <= n < top_down_map.shape[1]:
-#                         top_down_map[m, n] = (0, 255, 255)
-#             if np.linalg.norm(rounded_pred) < 1:
-#                 assert delta_x == 0 and delta_y == 0
-
-#         if top_down_map.shape[0] > top_down_map.shape[1]:
-#             top_down_map = np.rot90(top_down_map, 1)
-
-#         # scale top down map to align with rgb view
-#         if pred is None:
-#             old_h, old_w, _ = top_down_map.shape
-#             top_down_height = observation_size
-#             top_down_width = int(float(top_down_height) / old_h * old_w)
-#             # cv2 resize (dsize is width first)
-#             top_down_map = cv2.resize(
-#                 top_down_map.astype(np.float32),
-#                 (top_down_width, top_down_height),
-#                 interpolation=cv2.INTER_CUBIC,
-#             )
-#         else:
-#             # draw label
-#             CATEGORY_INDEX_MAPPING = {
-#                 'chair': 0,
-#                 'table': 1,
-#                 'picture': 2,
-#                 'cabinet': 3,
-#                 'cushion': 4,
-#                 'sofa': 5,
-#                 'bed': 6,
-#                 'chest_of_drawers': 7,
-#                 'plant': 8,
-#                 'sink': 9,
-#                 'toilet': 10,
-#                 'stool': 11,
-#                 'towel': 12,
-#                 'tv_monitor': 13,
-#                 'shower': 14,
-#                 'bathtub': 15,
-#                 'counter': 16,
-#                 'fireplace': 17,
-#                 'gym_equipment': 18,
-#                 'seating': 19,
-#                 'clothes': 20
-#             }
-#             index2label = {v: k for k, v in CATEGORY_INDEX_MAPPING.items()}
-#             pred_label = index2label[pred[0]]
-#             text_height = int(observation_size * 0.1)
-
-#             old_h, old_w, _ = top_down_map.shape
-#             top_down_height = observation_size - text_height
-#             top_down_width = int(float(top_down_height) / old_h * old_w)
-#             # cv2 resize (dsize is width first)
-#             top_down_map = cv2.resize(
-#                 top_down_map.astype(np.float32),
-#                 (top_down_width, top_down_height),
-#                 interpolation=cv2.INTER_CUBIC,
-#             )
-
-#             top_down_map = np.concatenate(
-#                 [np.ones([text_height, top_down_map.shape[1], 3], dtype=np.int32) * 255, top_down_map], axis=0)
-#             top_down_map = cv2.putText(top_down_map, 'C_t: ' + pred_label.replace('_', ' '), (10, text_height - 10),
-#                                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 0), 2, cv2.LINE_AA)
-
-#         frame = np.concatenate((egocentric_view, top_down_map), axis=1)
-#     return frame
