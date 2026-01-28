@@ -992,8 +992,8 @@ def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds
         render_frame = np.concatenate(render_obs_images, axis=1)
 
     # draw collision
-    if "collisions" in info and info["collisions"]["is_collision"]:
-        render_frame = draw_collision(render_frame)
+    # if "collisions" in info and info["collisions"]["is_collision"]:
+    #     render_frame = draw_collision(render_frame)
 
     if "top_down_map" in info:
         if sound_map is None or sim is None or sound_bounds is None or goal_position is None or pred_position is None:

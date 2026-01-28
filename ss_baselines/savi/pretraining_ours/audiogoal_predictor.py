@@ -250,6 +250,88 @@ class AudioGoalPredictor(nn.Module):
         return doa_logits, distance_logits
         return self.predictor(audio_observations)
 
+class AudioGoalPredictor_audio(nn.Module):
+    def __init__(self, predict_label=True, predict_location=True):
+        super(AudioGoalPredictor_audio, self).__init__()
+        self.input_shape_printed = False
+        self.spec_encoder = SpecEncoderGlobal(
+            in_channels=2,
+            channels=(16, 32, 64),
+            dropout=0.3,
+            out_dim=256,
+            use_compress=False
+        )
+
+        self.depth_encoder = DepthResNet18Encoder(
+            out_dim=64,
+            pretrained=True,
+        )
+
+        for p in self.depth_encoder.features.parameters():
+            p.requires_grad = False
+
+        self.film_gamma = nn.Linear(64, 256)
+        self.film_beta  = nn.Linear(64, 256)
+
+        self.fusion_fc = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+        )
+
+        self.doa_head = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, 360),
+        )
+        # self.num_distance_bins = num_distance_bins
+        self.distance_head = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, 120),
+        )
+        self.drop_depth_prob = 0.5
+
+    def forward(self, audio_feature):
+        if not self.input_shape_printed:
+            logging.info('Audiogoal predictor input audio feature shape: {}'.format(audio_feature["spectrogram"].shape))
+            self.input_shape_printed = True
+        audio_observations = audio_feature['spectrogram']
+        depth_observations = audio_feature['depth']
+        if not torch.is_tensor(audio_observations):
+            audio_observations = torch.from_numpy(audio_observations).to(device='cuda:0').unsqueeze(0)
+            depth_observations = torch.from_numpy(depth_observations).to(device='cuda:0').unsqueeze(0)
+
+        audio_observations = audio_observations.permute(0, 3, 1, 2)
+        spec_feat = self.spec_encoder(audio_observations)
+
+        depth_feat = self.depth_encoder(depth_observations) 
+
+        if self.training and torch.rand(1).item() < self.drop_depth_prob:
+            depth_feat = torch.zeros_like(depth_feat)
+
+        gamma = self.film_gamma(depth_feat)            # (B, spec_out_dim)
+        beta  = self.film_beta(depth_feat)             # (B, spec_out_dim)
+
+        gamma = 1.0 + 0.1 * torch.tanh(gamma)
+        beta  = 0.1 * torch.tanh(beta)
+
+        spec_film = gamma * spec_feat + beta           # (B, spec_out_dim)
+
+        out_feat = self.fusion_fc(spec_film)           # (B, fusion_out_dim)
+
+        # TODO
+        doa_logits = self.doa_head(spec_feat)
+        doa_logits = torch.sigmoid(doa_logits)
+
+        distance_logits = self.distance_head(spec_feat)
+        distance_logits = torch.sigmoid(distance_logits)
+
+        return doa_logits, distance_logits
+        return self.predictor(audio_observations)
+
 
 
 # class AudioGoalPredictor(nn.Module):

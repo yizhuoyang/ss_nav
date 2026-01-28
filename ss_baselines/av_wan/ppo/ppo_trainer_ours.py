@@ -497,7 +497,7 @@ class PPOTrainer(BaseRLTrainer):
 
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth'
         # model = SSLNet_DOA(use_compress=False).to(self.device)
-
+# 
         # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
         # model = SSLNet_depth_DOA(use_compress=False).to(self.device)
 
@@ -659,12 +659,12 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = True
+        use_visual = False
         save_vis   = False
         if use_visual:
             beta_r = 0.2
         else:
-            beta_r = 0.2
+            beta_r = 0.8
 
         H_l, W_l = 64, 64
         meters_per_pixel = 1.0

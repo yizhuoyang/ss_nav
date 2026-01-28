@@ -118,7 +118,8 @@ class MapNavEnv(habitat.RLEnv):
                     (refiner.x_min - 0.5*refiner.res, 0.0, refiner.z_min - 0.5*refiner.res),
                     (refiner.x_max + 0.5*refiner.res, 0.0, refiner.z_max + 0.5*refiner.res),
                 )
-        if use_visual:
+        vis_map            = vis_fuser.P
+        if use_visual and audio_intensity<= 0:
             sound_map_gaussian =sound_map
             # exp = geometric_map[:, :, 1] > 0.5  
             vis_map            = vis_fuser.P
@@ -132,6 +133,7 @@ class MapNavEnv(habitat.RLEnv):
             fused_sound_map = sound_map
             refiner.P          = fused_sound_map
 
+        video_map = vis_map+sound_map
         world_goal,_       = refiner._readout(agent_pose[0],agent_pose[1])
         refiner.P          = sound_map
 
@@ -163,7 +165,7 @@ class MapNavEnv(habitat.RLEnv):
                 observation, reward, done, info = super().step({"action": action})
                 if 'intermediate' in observation:
                     for observation_rgb in observation['intermediate']:
-                        frame = observations_to_image(observation_rgb, info,fused_sound_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
+                        frame = observations_to_image(observation_rgb, info,video_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
                         rgb_frames.append(frame)
                         audios.append(observation['audiogoal'])
                     del observation['intermediate']
@@ -208,7 +210,7 @@ class MapNavEnv(habitat.RLEnv):
             observation, reward, done, info = super().step({"action": action})
             if 'intermediate' in observation:
                 for observation_rgb in observation['intermediate']:
-                    frame = observations_to_image(observation_rgb, info,fused_sound_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
+                    frame = observations_to_image(observation_rgb, info,video_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
                     rgb_frames.append(frame)
                     # print(len(rgb_frames))
                     audios.append(observation['audiogoal'])
