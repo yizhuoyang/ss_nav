@@ -659,7 +659,7 @@ class PPOTrainer(BaseRLTrainer):
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         t = tqdm(total=self.config.TEST_EPISODE_COUNT)
-        use_visual = False
+        use_visual = True
         save_vis   = False
         if use_visual:
             beta_r = 0.2
@@ -688,7 +688,7 @@ class PPOTrainer(BaseRLTrainer):
         # load pre-calculated embedding for audio-lang mapping
         id_to_text = load_id_to_text("/media/kemove/data/av_nav/data/new/object_sounds.csv")
         text_embed = torch.load("/media/kemove/data/av_nav/data/new/object_sounds_text_embed.pt").to(self.device)
-        db_path = "/media/kemove/data/av_nav/data/audio_embeddings/audio_mean_1s.pt"
+        db_path = "/media/kemove/data/av_nav/data/audio_embeddings/audio_mean_1s_train.pt"
         # db_path = "/media/kemove/data/av_nav/data/audio_embeddings_sup/all_splits_class_mean_1s.pt"
 
         total_exp   = 0

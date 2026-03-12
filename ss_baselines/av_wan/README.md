@@ -42,3 +42,7 @@ If you use this model in your research, please cite the following paper:
 # python ss_baselines/av_wan/run.py --run-type eval --exp-config /home/Disk/yyz/sound-spaces/ss_baselines/av_wan/config/audionav/mp3d/val_with_am.yaml --model-dir data/models/mp3d/audiogoal_depth EVAL_CKPT_PATH_DIR /home/Disk/sound-space/data/pretrained_weights/audionav/av_wan/mp3d/heard.pth TASK_CONFIG.SIMULATOR.USE_RENDERED_OBSERVATIONS False TASK_CONFIG.TASK.SENSORS [\"POINTGOAL_WITH_GPS_COMPASS_SENSOR\",\"SPECTROGRAM_SENSOR\",\"AUDIOGOAL_SENSOR\",\"EGOMAP_SENSOR\",\"COLLISION\",\"POSE_SENSOR\"] SENSORS [\"RGB_SENSOR\",\"DEPTH_SENSOR\"] TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False DISPLAY_RESOLUTION 512 TEST_EPISODE_COUNT 2 TASK_CONFIG.SIMULATOR.CONTINUOUS_VIEW_CHANGE False VIDEO_OPTION [\"disk\"] VIDEO_DIR /home/Disk/yyz/sound-spaces/video_wan 
 
 
+# sudo mount --bind /home/Disk/yyz/ss_data/gxdoqLR6rwA /media/kemove/data/sound-spaces/data/binaural_rirs/mp3d/gxdoqLR6rwA
+
+
+/home/Disk/yyz/ss_data/gxdoqLR6rwA
