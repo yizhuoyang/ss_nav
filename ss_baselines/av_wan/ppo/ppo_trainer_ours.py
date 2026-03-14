@@ -485,9 +485,9 @@ class PPOTrainer(BaseRLTrainer):
         ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
 
         ############### Load SSL model and checkpoint ##################
-        CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
+        # CKPT_PATH = '/home/Disk/yyz/sound-spaces/data/models/savi_final_depth_ipd/ckpt.46.pth'
         # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_iros/laset_epoch.pth'
-        # CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'
+        CKPT_PATH = '/media/kemove/data/sound-spaces/data/models/savi_final_depth/ckpt.73.pth'
         # CKPT_PATH = 'comparison/sound-spaces/data/models/savi_ours_noise_tune/laset_epoch.pth'
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_ral/laset_epoch.pth"
         # CKPT_PATH = "/media/kemove/data/sound-spaces/data/models/savi_final_ipd_tune/laset_epoch.pth"
