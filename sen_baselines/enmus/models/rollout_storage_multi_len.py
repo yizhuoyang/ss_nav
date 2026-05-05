@@ -243,6 +243,7 @@ class ExternalMemoryMultiLen(ExternalMemory):
         self.is_mapping = is_mapping
 
     def insert(self, em_features, not_done_masks, step=0):
+        em_features = torch.nan_to_num(em_features, nan=0.0, posinf=0.0, neginf=0.0)
         self.memory[self.idx].copy_(em_features.unsqueeze(0))
         # Account for overflow capacity
         capacity_overflow_flag = self.masks.sum(1) == self.capacity

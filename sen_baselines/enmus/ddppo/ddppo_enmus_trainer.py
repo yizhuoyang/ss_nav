@@ -106,7 +106,11 @@ class DDPPOTrainer(PPOTrainer):
 
         if self.config.RL.DDPPO.pretrained:
             # load weights for both actor critic and the encoder
-            pretrained_state = torch.load(self.config.RL.DDPPO.pretrained_weights, map_location="cpu")
+            pretrained_state = torch.load(
+                self.config.RL.DDPPO.pretrained_weights,
+                map_location="cpu",
+                weights_only=False,
+            )
             self.actor_critic.load_state_dict(
                 {
                     k[len("actor_critic."):]: v
@@ -148,7 +152,7 @@ class DDPPOTrainer(PPOTrainer):
             use_normalized_advantage=ppo_cfg.use_normalized_advantage,
         )
 
-        if smt_cfg.actor_critic_pretrained_path != -1:
+        if smt_cfg.actor_critic_pretrained_path not in ("", "-1", -1):
             print("use pretrained model for actor critic ", smt_cfg.actor_critic_pretrained_path)
             ckpt_dict = self.load_checkpoint(smt_cfg.actor_critic_pretrained_path, map_location="cpu")
             self.agent.load_state_dict(ckpt_dict["state_dict"])

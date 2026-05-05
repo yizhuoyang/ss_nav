@@ -92,6 +92,7 @@ _C.RL.PPO.tau = 0.95
 _C.RL.PPO.reward_window_size = 50
 _C.RL.PPO.use_normalized_advantage = False
 _C.RL.PPO.policy_type = 'rnn'
+_C.RL.PPO.use_category_input = False
 _C.RL.PPO.use_external_memory = False
 _C.RL.PPO.use_mlp_state_encoder = False
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER = CN()
@@ -168,6 +169,10 @@ _TC.SIMULATOR.AUDIO.POINTS_FILE = 'points.txt'
 _TC.SIMULATOR.AUDIO.GRAPH_FILE = 'graph.pkl'
 _TC.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND = False
 _TC.SIMULATOR.AUDIO.DISTRACTOR_SOUND_DIR = 'data/sounds/1s_all_distractor'
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_DB = 0.0
+_TC.SIMULATOR.AUDIO.RANDOMIZE_DISTRACTOR_SNR = False
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_MIN_DB = 0.0
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_MAX_DB = 60.0
 # -----------------------------------------------------------------------------
 # DistanceToGoal Measure
 # -----------------------------------------------------------------------------

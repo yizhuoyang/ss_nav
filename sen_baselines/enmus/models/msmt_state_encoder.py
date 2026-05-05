@@ -102,10 +102,10 @@ class MSMTStateEncoder(nn.Module):
         masks = [memory_masks]
         for i, ratio in enumerate(self._pool_ratios):
             if i == 0:
-                mask = torch.floor(F.avg_pool1d(masks[-1], ratio, ratio))
+                mask = F.max_pool1d(masks[-1], ratio, ratio)
                 masks.append(mask)
             else:
-                mask = torch.floor(F.avg_pool1d(masks[-1], 2, 2))
+                mask = F.max_pool1d(masks[-1], 2, 2)
                 masks.append(mask)
         masks = torch.cat(masks, dim=1)
 

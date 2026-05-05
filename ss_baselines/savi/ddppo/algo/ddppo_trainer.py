@@ -71,6 +71,7 @@ class DDPPOTrainer(PPOTrainer):
         self.action_space = action_space
 
         has_distractor_sound = self.config.TASK_CONFIG.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND
+        use_category_input = ppo_cfg.use_category_input
         if ppo_cfg.policy_type == 'rnn':
             self.actor_critic = AudioNavBaselinePolicy(
                 observation_space=self.envs.observation_spaces[0],
@@ -85,7 +86,7 @@ class DDPPOTrainer(PPOTrainer):
                 belief_cfg = ppo_cfg.BELIEF_PREDICTOR
                 bp_class = BeliefPredictorDDP if belief_cfg.online_training else BeliefPredictor
                 self.belief_predictor = bp_class(belief_cfg, self.device, None, None,
-                                                 ppo_cfg.hidden_size, self.envs.num_envs, has_distractor_sound
+                                                 ppo_cfg.hidden_size, self.envs.num_envs, use_category_input
                                                  ).to(device=self.device)
                 if belief_cfg.online_training:
                     params = list(self.belief_predictor.predictor.parameters())
@@ -116,7 +117,7 @@ class DDPPOTrainer(PPOTrainer):
                 use_label_belief=belief_cfg.use_label_belief,
                 use_location_belief=belief_cfg.use_location_belief,
                 normalize_category_distribution=belief_cfg.normalize_category_distribution,
-                use_category_input=has_distractor_sound
+                use_category_input=use_category_input
             )
             if smt_cfg.freeze_encoders:
                 self._static_smt_encoder = True
@@ -126,7 +127,7 @@ class DDPPOTrainer(PPOTrainer):
                 smt = self.actor_critic.net.smt_state_encoder
                 bp_class = BeliefPredictorDDP if belief_cfg.online_training else BeliefPredictor
                 self.belief_predictor = bp_class(belief_cfg, self.device, smt._input_size, smt._pose_indices,
-                                                 smt.hidden_state_size, self.envs.num_envs, has_distractor_sound
+                                                 smt.hidden_state_size, self.envs.num_envs, use_category_input
                                                  ).to(device=self.device)
                 if belief_cfg.online_training:
                     params = list(self.belief_predictor.predictor.parameters())
@@ -289,7 +290,14 @@ class DDPPOTrainer(PPOTrainer):
         if self.config.RL.PPO.use_belief_predictor:
             self.belief_predictor.update(batch, None)
 
+        # for sensor in rollouts.observations:
+        #     rollouts.observations[sensor][0].copy_(batch[sensor])
+
         for sensor in rollouts.observations:
+            if sensor == 'depth' and batch[sensor].dim() == 5:
+                batch[sensor] = batch[sensor].squeeze(-1)
+
+            # print(batch[sensor].shape, rollouts.observations[sensor][0].shape,sensor)
             rollouts.observations[sensor][0].copy_(batch[sensor])
 
         # batch and observations may contain shared PyTorch CUDA
@@ -529,4 +537,3 @@ class DDPPOTrainer(PPOTrainer):
                         count_checkpoints += 1
 
             self.envs.close()
-

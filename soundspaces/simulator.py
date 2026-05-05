@@ -417,6 +417,11 @@ class SoundSpacesSim(Simulator, ABC):
                                  self.config.AGENT_0.START_ROTATION)
 
         if self.config.AUDIO.HAS_DISTRACTOR_SOUND:
+            if self.config.AGENT_0.DISTRACTOR_SOUND_ID is None:
+                raise ValueError(
+                    "HAS_DISTRACTOR_SOUND=True requires a distractor dataset split "
+                    "with distractor_sound_id, for example train_distractor."
+                )
             self._distractor_position_index = self.config.AGENT_0.DISTRACTOR_POSITION_INDEX
             self._current_distractor_sound = self.config.AGENT_0.DISTRACTOR_SOUND_ID
             self._load_single_distractor_sound()
@@ -679,7 +684,7 @@ class SoundSpacesSim(Simulator, ABC):
                                                              ) for channel in range(distractor_rir.shape[-1])])
 
                 distractor_seg = distractor_convolved[:, :sampling_rate].astype(np.float32)
-                snr_db = 0
+                snr_db = 10
                 sig = audiogoal[:, :sampling_rate].astype(np.float32)
 
                 eps = 1e-12

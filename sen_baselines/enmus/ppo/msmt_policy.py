@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from soundspaces.tasks.nav import PoseSensor, SpectrogramSensor, LocationBelief, CategoryBelief, Category
-from ss_baselines.common.utils import CategoricalNet
+from ss_baselines.common.utils import CategoricalNet, CustomFixedCategorical
 from ss_baselines.savi.models.smt_cnn import SMTCNN
 from sen_baselines.enmus.models.goal_descriptor import GoalDescriptor
 from sen_baselines.enmus.models.msmt_state_encoder import MSMTStateEncoder
@@ -29,6 +29,12 @@ class Policy(nn.Module):
     def forward(self, *x):
         raise NotImplementedError
 
+    def _distribution(self, features):
+        logits = self.action_distribution.linear(features)
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=20.0, neginf=-20.0)
+        logits = torch.clamp(logits, min=-20.0, max=20.0)
+        return CustomFixedCategorical(logits=logits)
+
     def act(
         self,
         observations,
@@ -42,7 +48,9 @@ class Policy(nn.Module):
         features, rnn_hidden_states, ext_memory_feats = self.net(
             observations, rnn_hidden_states, prev_actions, masks, ext_memory, ext_memory_masks
         )
-        distribution = self.action_distribution(features)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        ext_memory_feats = torch.nan_to_num(ext_memory_feats, nan=0.0, posinf=0.0, neginf=0.0)
+        distribution = self._distribution(features)
         value = self.critic(features)
 
         if deterministic:
@@ -58,6 +66,7 @@ class Policy(nn.Module):
         features, _, _ = self.net(
             observations, rnn_hidden_states, prev_actions, masks, ext_memory, ext_memory_masks
         )
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         return self.critic(features)
 
     def evaluate_actions(
@@ -74,7 +83,9 @@ class Policy(nn.Module):
             observations, rnn_hidden_states, prev_actions,
             masks, ext_memory, ext_memory_masks
         )
-        distribution = self.action_distribution(features)
+        features = torch.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        ext_memory_feats = torch.nan_to_num(ext_memory_feats, nan=0.0, posinf=0.0, neginf=0.0)
+        distribution = self._distribution(features)
         value = self.critic(features)
 
         action_log_probs = distribution.log_probs(action)
@@ -184,7 +195,7 @@ class AudioNavMSMTNet(Net):
         nfeats = self.visual_encoder.feature_dims + action_encoding_dims + audio_feature_dims
 
         if self._use_category_input:
-            nfeats += 20
+            nfeats += observation_space.spaces[Category.cls_uuid].shape[0]
 
         # Add pose observations to the memory
         assert PoseSensor.cls_uuid in observation_space.spaces
@@ -253,6 +264,7 @@ class AudioNavMSMTNet(Net):
             belief = None
 
         x_att = self.smt_state_encoder(x, ext_memory, ext_memory_masks, goal=belief)
+        x_att = torch.nan_to_num(x_att, nan=0.0, posinf=0.0, neginf=0.0)
         if self._use_residual_connection:
             x_att = torch.cat([x_att, x], 1)
 
@@ -270,8 +282,8 @@ class AudioNavMSMTNet(Net):
         
     def pretrained_initialization(self, audio_path, visual_path):
         print("Loading pretrained models...")
-        audio_state_dict = torch.load(audio_path)['state_dict']
-        visual_state_dict = torch.load(visual_path)['state_dict']
+        audio_state_dict = torch.load(audio_path, map_location="cpu", weights_only=False)['state_dict']
+        visual_state_dict = torch.load(visual_path, map_location="cpu", weights_only=False)['state_dict']
 
         self.goal_encoder.load_state_dict(
             {
@@ -320,6 +332,7 @@ class AudioNavMSMTNet(Net):
         x.append(observations[PoseSensor.cls_uuid])
 
         x = torch.cat(x, dim=1)
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
         return x
     
@@ -374,7 +387,7 @@ class AudioNavMSMTNetWithGD(Net):
         nfeats = self.visual_encoder.feature_dims + action_encoding_dims + audio_feature_dims
 
         if self._use_category_input:
-            nfeats += 20
+            nfeats += observation_space.spaces[SenCategory.cls_uuid].shape[0]
 
         assert PoseSensor.cls_uuid in observation_space.spaces
         if PoseSensor.cls_uuid in observation_space.spaces:
@@ -450,8 +463,8 @@ class AudioNavMSMTNetWithGD(Net):
         
     def pretrained_initialization(self, audio_path, visual_path):
         print("Loading pretrained models...")
-        audio_state_dict = torch.load(audio_path)['state_dict']
-        visual_state_dict = torch.load(visual_path)['state_dict']
+        audio_state_dict = torch.load(audio_path, map_location="cpu", weights_only=False)['state_dict']
+        visual_state_dict = torch.load(visual_path, map_location="cpu", weights_only=False)['state_dict']
 
         self.goal_encoder.load_state_dict(
             {
@@ -504,6 +517,7 @@ class AudioNavMSMTNetWithGD(Net):
         x.append(observations[PoseSensor.cls_uuid])
 
         x = torch.cat(x, dim=1)
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
         return x
 
@@ -535,6 +549,7 @@ class AudioNavMSMTNetWithGD(Net):
             belief = None
 
         x_att = self.smt_state_encoder(x, ext_memory, ext_memory_masks, goal=belief)
+        x_att = torch.nan_to_num(x_att, nan=0.0, posinf=0.0, neginf=0.0)
         if self._use_residual_connection:
             x_att = torch.cat([x_att, x], 1)
 

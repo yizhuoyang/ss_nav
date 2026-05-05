@@ -1,6 +1,6 @@
 BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal.yaml"
 # BASE_TASK_CONFIG_PATH: "configs/semantic_audionav/savi/mp3d/semantic_audiogoal_distractor.yaml"
-TRAINER_NAME: "ddppo" #AVNavTrainer
+TRAINER_NAME: "ddppo_enmus"
 NUM_PROCESSES: 8
 SENSORS: ["DEPTH_SENSOR", "RGB_SENSOR"]
 NUM_UPDATES: 20000
@@ -30,19 +30,21 @@ RL:
     # window size for calculating the past rewards
     reward_window_size: 50
     use_normalized_advantage: False
-    policy_type: "smt"
-    use_belief_predictor: True
+    policy_type: "msmt"
+    use_belief_predictor: False
     use_external_memory: True
     SCENE_MEMORY_TRANSFORMER:
-      memory_size: 150
+      memory_size: 159
       hidden_size: 256
       nhead: 8
       num_encoder_layers: 1
       num_decoder_layers: 1
       dropout: 0.0
       activation: 'relu'
-      use_pretrained: False
+      use_pretrained: True
       pretrained_path: ''
+      audio_pretrained_path: 'comparison/ENMuS/data/pretrained_weights/semantic_audionav/enmus/audio_encoder_best_val.pth'
+      visual_pretrained_path: 'comparison/ENMuS/data/pretrained_weights/semantic_audionav/enmus/visual_encoder_best_val.pth'
       freeze_encoders: True
       pretraining: False
     BELIEF_PREDICTOR:
@@ -59,5 +61,7 @@ RL:
     backbone: "custom_resnet18"
     # choose the best pretrained SAVi based on validation curve
     pretrained_weights: "data/models/savi/data_pretrain/ckpt.23.pth"
-    pretrained: True
+    pretrained: False
     reset_critic: False
+
+

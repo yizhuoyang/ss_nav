@@ -76,7 +76,9 @@ class GoalDescriptor(nn.Module):
         print("Load pretrained parameters from: ", model_path)
         self.cst_former.load_state_dict(
             torch.load(
-                model_path
+                model_path,
+                map_location="cpu",
+                weights_only=False,
             )
         )
 

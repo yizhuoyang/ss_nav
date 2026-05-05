@@ -92,10 +92,11 @@ _C.RL.PPO.tau = 0.95
 _C.RL.PPO.reward_window_size = 50
 _C.RL.PPO.use_normalized_advantage = False
 _C.RL.PPO.policy_type = 'rnn'
+_C.RL.PPO.norm_first = False
 _C.RL.PPO.use_external_memory = False
 _C.RL.PPO.use_mlp_state_encoder = False
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER = CN()
-_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.memory_size = 300
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.memory_size = 159
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.hidden_size = 128
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.nhead = 8
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.num_encoder_layers = 1
@@ -108,6 +109,15 @@ _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.freeze_encoders = False
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.pretraining = False
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.use_action_encoding = True
 _C.RL.PPO.SCENE_MEMORY_TRANSFORMER.use_belief_encoding = False
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.audio_pretrained_path = ''
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.visual_pretrained_path = ''
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.seld_pretrained_path = ''
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.actor_critic_pretrained_path = ''
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.use_goal_descriptor = False
+_C.RL.PPO.SCENE_MEMORY_TRANSFORMER.decoder_type = 'MSMT'
+_C.RL.PPO.SELD_ENCODER = CN()
+_C.RL.PPO.SELD_ENCODER.gd_encoder_type = 'CRNN'
+_C.RL.PPO.SELD_ENCODER.use_downsample = True
 _C.RL.PPO.use_belief_predictor = False
 _C.RL.PPO.BELIEF_PREDICTOR = CN()
 _C.RL.PPO.BELIEF_PREDICTOR.online_training = False
@@ -142,12 +152,12 @@ _TC.defrost()
 # AUDIOGOAL_SENSOR
 # -----------------------------------------------------------------------------
 _TC.TASK.AUDIOGOAL_SENSOR = CN()
-_TC.TASK.AUDIOGOAL_SENSOR.TYPE = "AudioGoalSensor"
+_TC.TASK.AUDIOGOAL_SENSOR.TYPE = "SoundEventAudioGoalSensor"
 # -----------------------------------------------------------------------------
 # SPECTROGRAM_SENSOR
 # -----------------------------------------------------------------------------
 _TC.TASK.SPECTROGRAM_SENSOR = CN()
-_TC.TASK.SPECTROGRAM_SENSOR.TYPE = "SpectrogramSensor"
+_TC.TASK.SPECTROGRAM_SENSOR.TYPE = "SoundEventSpectrogramSensor"
 # -----------------------------------------------------------------------------
 # soundspaces
 # -----------------------------------------------------------------------------
@@ -159,6 +169,7 @@ _TC.SIMULATOR.USE_RENDERED_OBSERVATIONS = True
 _TC.SIMULATOR.SCENE_OBSERVATION_DIR = 'data/scene_observations_128'
 _TC.SIMULATOR.AUDIO = CN()
 _TC.SIMULATOR.AUDIO.SCENE = ""
+_TC.SIMULATOR.AUDIO.TYPE = "diff"
 _TC.SIMULATOR.AUDIO.EVERLASTING = True
 _TC.SIMULATOR.AUDIO.BINAURAL_RIR_DIR = "data/binaural_rirs"
 _TC.SIMULATOR.AUDIO.RIR_SAMPLING_RATE = 44100
@@ -190,7 +201,7 @@ _TC.TASK.VIEW_POINT_GOALS.TYPE = "ViewPointGoals"
 # Intensity estimated from ambisonic
 # -----------------------------------------------------------------------------
 _TC.TASK.CATEGORY = SIMULATOR_SENSOR.clone()
-_TC.TASK.CATEGORY.TYPE = "Category"
+_TC.TASK.CATEGORY.TYPE = "SoundEventCategory"
 _TC.TASK.CATEGORY_BELIEF = SIMULATOR_SENSOR.clone()
 _TC.TASK.CATEGORY_BELIEF.TYPE = "CategoryBelief"
 _TC.TASK.LOCATION_BELIEF = SIMULATOR_SENSOR.clone()
@@ -260,6 +271,12 @@ def get_config(
     """
     config = merge_from_path(_C.clone(), config_paths)
     config.TASK_CONFIG = get_task_config(config_paths=config.BASE_TASK_CONFIG_PATH)
+    config.TASK_CONFIG.defrost()
+    config.TASK_CONFIG.TASK.AUDIOGOAL_SENSOR.TYPE = "SoundEventAudioGoalSensor"
+    config.TASK_CONFIG.TASK.SPECTROGRAM_SENSOR.TYPE = "SoundEventSpectrogramSensor"
+    config.TASK_CONFIG.TASK.CATEGORY.TYPE = "SoundEventCategory"
+    config.TASK_CONFIG.SIMULATOR.AUDIO.TYPE = "diff"
+    config.TASK_CONFIG.freeze()
 
     # config_name = os.path.basename(config_paths).split('.')[0]
     if model_dir is not None:

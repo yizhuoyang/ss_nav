@@ -56,6 +56,6 @@ RL:
     rnn_type: "GRU"
     num_recurrent_layers: 1
     # choose the best pretrained SAVi based on validation curve
-    pretrained_weights: "data/models/savi/data/ckpt.XXX.pth"
-    pretrained: True
+    pretrained_weights: "data/models/savi/data/ckpt.23.pth"
+    pretrained: False
     reset_critic: False

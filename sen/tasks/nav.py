@@ -27,6 +27,7 @@ from habitat.utils.geometry_utils import (
     quaternion_rotate_vector,
 )
 from habitat.tasks.utils import cartesian_to_polar
+from soundspaces.mp3d_utils import CATEGORY_INDEX_MAPPING
 
 
 @registry.register_sensor(name="SoundEventAudioGoalSensor")
@@ -105,7 +106,7 @@ class SoundEventSpectrogramSensor(Sensor):
     @staticmethod
     def compute_diff_spectrogram(audio_data, sr=16000, hop_len_s=0.02):
         def compute_diff(signal):
-            ratio = signal[:, :, 0] / signal[:, :, 1] + 1e-8
+            ratio = signal[:, :, 0] / (signal[:, :, 1] + 1e-8)
             angle = np.angle(ratio)
             amp = np.abs(ratio)
             return angle, amp
@@ -122,7 +123,7 @@ class SoundEventSpectrogramSensor(Sensor):
     @staticmethod
     def compute_diff_gd_spectrogram(audio_data, sr=16000, hop_len_s=0.02):
         def compute_diff(signal):
-            ratio = signal[:, :, 0] / signal[:, :, 1] + 1e-8
+            ratio = signal[:, :, 0] / (signal[:, :, 1] + 1e-8)
             angle = np.angle(ratio)
             amp = np.abs(ratio)
             return angle, amp
@@ -215,28 +216,7 @@ class SenCategory(Sensor):
 
     def __init__(self, sim: Union[Simulator, Config], config: Config, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
-        self._category_mapping = {
-            "bathtub": 0, 
-            "bed": 1, 
-            "cabinet": 2, 
-            "chair": 3, 
-            "chest_of_drawers": 4, 
-            "clothes": 5,
-            "counter": 6, 
-            "cushion": 7, 
-            "fireplace": 8, 
-            "picture": 9, 
-            "plant": 10, 
-            "seating": 11, 
-            "shower": 12, 
-            "sink": 13, 
-            "sofa": 14, 
-            "stool": 15, 
-            "table": 16, 
-            "toilet": 17, 
-            "towel": 18, 
-            "tv_monitor": 19
-        }
+        self._category_mapping = CATEGORY_INDEX_MAPPING
         super().__init__(config=config)
 
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:

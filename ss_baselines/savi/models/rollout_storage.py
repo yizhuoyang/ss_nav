@@ -113,6 +113,8 @@ class RolloutStorage:
         em_features,
     ):
         for sensor in observations:
+            if sensor == 'depth' and observations[sensor].dim() == 5:
+                observations[sensor] = observations[sensor].squeeze(-1)
             self.observations[sensor][self.step + 1].copy_(
                 observations[sensor]
             )

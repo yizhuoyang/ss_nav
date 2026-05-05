@@ -11,8 +11,7 @@ import os
 import sys
 sys.path.append('/home/Disk/yyz/sound-spaces')
 from ss_baselines.common.baseline_registry import baseline_registry
-# from ss_baselines.enmus.config.default import get_config
-from ss_baselines.savi.config.default import get_config
+from sen_baselines.enmus.config.default import get_config
 from sen_baselines.enmus.ppo.msmt_policy import AudioNavMSMTNetWithGD
 
 
