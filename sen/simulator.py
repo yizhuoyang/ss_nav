@@ -542,6 +542,10 @@ class SoundEventNavSim(Simulator, ABC):
         
         if self.config.AUDIO.HAS_DISTRACTOR_SOUND:
             self._distractor_audio_index = 0
+            self._logged_distractor_snr = False
+            self._logged_distractor_feature_delta = False
+            self._logged_distractor_spectrogram_delta = False
+            self._last_clean_audiogoal = None
             is_same_distractor_sound = config.AGENT_0.DISTRACTOR_SOUND_ID == self._current_distractor_sound
             if not is_same_distractor_sound:
                 self._current_distractor_sound = self.config.AGENT_0.DISTRACTOR_SOUND_ID
@@ -802,7 +806,8 @@ class SoundEventNavSim(Simulator, ABC):
 
     def _compute_audiogoal(self):
         sr = self.config.AUDIO.RIR_SAMPLING_RATE
-        step_idx = self._episode_step_count
+        current_step_idx = self._episode_step_count
+        step_idx = current_step_idx
 
         if self.config.AUDIO.TYPE in ["binaural", "diff", "diff_gd"]:
             nb_channel = 2
@@ -884,77 +889,84 @@ class SoundEventNavSim(Simulator, ABC):
         
         # add distractor sound to audiogoal
         if self.config.AUDIO.HAS_DISTRACTOR_SOUND:
-            if (
-                step_idx < self._distractor_offset or 
-                step_idx > self._distractor_offset + self._distractor_duration
-            ):
-                distractor_audiogoal = np.zeros((nb_channel, sr))
-            else:
-                if self.config.USE_RENDERED_OBSERVATIONS:
-                    if self.config.AUDIO.TYPE in ["binaural", "diff", "diff_gd"]:
-                        rir_file = os.path.join(cache_rir_path, 
-                                                        str(self.azimuth_angle), 
-                                                        "{}_{}.wav".format(
-                                                            self._receiver_position_index,
-                                                            self._distractor_position_index,
-                                                        ))
-                    else:
-                        raise ValueError("Unknown audio type {}".format(self.config.AUDIO.TYPE))
-
-                    try:
-                        sampling_freq, rir = wavfile.read(rir_file)
-                    except ValueError:
-                        logging.exception("{} file is not readable".format(rir_file))
-                        rir = np.zeros((sr, nb_channel))
-                    if len(rir) == 0:
-                        rir = np.zeros((sr, nb_channel))
-                    
+            if self.config.USE_RENDERED_OBSERVATIONS:
+                if self.config.AUDIO.TYPE in ["binaural", "diff", "diff_gd"]:
+                    rir_file = os.path.join(cache_rir_path, 
+                                                    str(self.azimuth_angle), 
+                                                    "{}_{}.wav".format(
+                                                        self._receiver_position_index,
+                                                        self._distractor_position_index,
+                                                    ))
                 else:
-                    audio_sensor = self._sim.get_agent(0)._sensors["audio_sensor"]
-                    audio_sensor.setAudioSourceTransform(np.array(self.config.AGENT_0.DISTRACTOR_POSITION) + np.array([0, 1.5, 0]))
-                    rir = np.transpose(np.array(self._sim.get_sensor_observations()["audio_sensor"]))
+                    raise ValueError("Unknown audio type {}".format(self.config.AUDIO.TYPE))
+
+                try:
+                    sampling_freq, distractor_rir = wavfile.read(rir_file)
+                except ValueError:
+                    logging.exception("{} file is not readable".format(rir_file))
+                    distractor_rir = np.zeros((sr, nb_channel))
+                except FileNotFoundError:
+                    logging.warning("{} file not found".format(rir_file))
+                    distractor_rir = np.zeros((sr, nb_channel))
+                if len(distractor_rir) == 0:
+                    distractor_rir = np.zeros((sr, nb_channel))
                 
-                rir_len = rir.shape[0]
-                rir_time_ceil = rir_len // sr + 1
+            else:
+                audio_sensor = self._sim.get_agent(0)._sensors["audio_sensor"]
+                audio_sensor.setAudioSourceTransform(np.array(self.config.AGENT_0.DISTRACTOR_POSITION) + np.array([0, 1.5, 0]))
+                distractor_rir = np.transpose(np.array(self._sim.get_sensor_observations()["audio_sensor"]))
 
-                distractor_audio_idx = self._distractor_audio_index
-                if self._distractor_sound_interval_determine[step_idx] == 1:
-                    self._distractor_audio_index = (self._distractor_audio_index + 1) % self._distractor_audio_length
+            distractor_convolved = np.array([
+                fftconvolve(self.current_distractor_sound, distractor_rir[:, channel])
+                for channel in range(nb_channel)
+            ])
+            distractor_audiogoal = distractor_convolved[:, :sr].astype(np.float32)
 
-                if step_idx * sr - rir_len < 0:
-                    zero_padding = np.zeros(rir_len - step_idx * sr + 1, )
-                    index = step_idx
-                else:
-                    zero_padding = np.zeros(1, )
-                    index = rir_time_ceil
+            if self.config.AUDIO.RANDOMIZE_DISTRACTOR_SNR:
+                snr_db = np.random.uniform(
+                    self.config.AUDIO.DISTRACTOR_SNR_MIN_DB,
+                    self.config.AUDIO.DISTRACTOR_SNR_MAX_DB,
+                )
+            else:
+                snr_db = self.config.AUDIO.DISTRACTOR_SNR_DB
 
-                distractor_sound = np.zeros(1, )
-                while index >= 0:
-                    if self._distractor_sound_interval_determine[step_idx] == 1:
-                        if distractor_audio_idx != -1:
-                            step_sound = self.current_distractor_sound[distractor_audio_idx * sr : (distractor_audio_idx + 1) * sr]
-                        else:
-                            step_sound = self.current_distractor_sound[distractor_audio_idx * sr : self._distractor_audio_length * sr]
-                        distractor_audio_idx -= 1
-                        if np.abs(distractor_audio_idx) >= self._distractor_audio_length:
-                            distractor_audio_idx = 0
-                    else:
-                        step_sound = np.zeros(sr, )
+            clean_audiogoal = audiogoal.copy()
+            self._last_clean_audiogoal = clean_audiogoal
+            eps = 1e-12
+            signal_power = float(np.mean(audiogoal[:, :sr].astype(np.float32) ** 2) + eps)
+            distractor_power = float(np.mean(distractor_audiogoal.astype(np.float32) ** 2) + eps)
+            target_distractor_power = signal_power / (10.0 ** (float(snr_db) / 10.0))
+            distractor_scale = np.sqrt(target_distractor_power / distractor_power)
+            distractor_audiogoal = (distractor_audiogoal * distractor_scale).astype(np.float32)
+            if not self._logged_distractor_snr:
+                scaled_distractor_power = float(np.mean(distractor_audiogoal.astype(np.float32) ** 2) + eps)
+                actual_snr_db = 10.0 * np.log10(signal_power / scaled_distractor_power)
+                logging.info(
+                    "Distractor SNR active: configured=%.3f dB, actual=%.3f dB, "
+                    "signal_power=%.6e, distractor_power=%.6e, scale=%.6e",
+                    float(snr_db),
+                    float(actual_snr_db),
+                    signal_power,
+                    scaled_distractor_power,
+                    float(distractor_scale),
+                )
+                self._logged_distractor_snr = True
 
-                    index -= 1
-                    step_idx -= 1
-                    distractor_sound = np.concatenate([step_sound, distractor_sound])
-
-                distractor_sound = np.concatenate([zero_padding, distractor_sound])
-                distractor_sound = distractor_sound[-(sr + rir_len) : -1]
-                distractor_audiogoal = np.array([
-                    fftconvolve(distractor_sound, rir[:, channel], mode='valid')
-                    for channel in range(nb_channel)
-                ])
-
-                audiogoal = audiogoal + distractor_audiogoal
+            audiogoal[:, :sr] = audiogoal[:, :sr] + distractor_audiogoal
+            if not self._logged_distractor_feature_delta:
+                delta = audiogoal.astype(np.float32) - clean_audiogoal.astype(np.float32)
+                logging.info(
+                    "Distractor waveform delta: snr=%.3f dB, clean_abs_mean=%.6e, "
+                    "delta_abs_mean=%.6e, mixed_abs_mean=%.6e",
+                    float(snr_db),
+                    float(np.mean(np.abs(clean_audiogoal))),
+                    float(np.mean(np.abs(delta))),
+                    float(np.mean(np.abs(audiogoal))),
+                )
+                self._logged_distractor_feature_delta = True
         
         if self.config.AUDIO.HAS_NOISE:
+            step_idx = current_step_idx
             if (
                 step_idx < self._noise_offset or 
                 step_idx > self._noise_offset + self._noise_duration
@@ -1068,8 +1080,22 @@ class SoundEventNavSim(Simulator, ABC):
 
     def get_current_audiogoal_observation(self):
         if self.config.AUDIO.HAS_DISTRACTOR_SOUND:
-            # by default, does not cache for distractor sound
-            audiogoal = self._compute_audiogoal()
+            joint_index = (
+                self._source_position_index,
+                self._distractor_position_index,
+                self._receiver_position_index,
+                self.azimuth_angle,
+                self._episode_step_count,
+                self._current_sound,
+                self._current_distractor_sound,
+                self.config.AUDIO.RANDOMIZE_DISTRACTOR_SNR,
+                float(self.config.AUDIO.DISTRACTOR_SNR_DB),
+                float(self.config.AUDIO.DISTRACTOR_SNR_MIN_DB),
+                float(self.config.AUDIO.DISTRACTOR_SNR_MAX_DB),
+            )
+            if joint_index not in self._audiogoal_cache:
+                self._audiogoal_cache[joint_index] = self._compute_audiogoal()
+            audiogoal = self._audiogoal_cache[joint_index]
         else:
             joint_index = (self._source_position_index, self._receiver_position_index, self.azimuth_angle, self._episode_step_count)
             if joint_index not in self._audiogoal_cache:
@@ -1081,8 +1107,40 @@ class SoundEventNavSim(Simulator, ABC):
 
     def get_current_spectrogram_observation(self, audiogoal2spectrogram):
         if self.config.AUDIO.HAS_DISTRACTOR_SOUND:
-            audiogoal = self.get_current_audiogoal_observation()
-            spectrogram = audiogoal2spectrogram(audiogoal)
+            joint_index = (
+                self._source_position_index,
+                self._distractor_position_index,
+                self._receiver_position_index,
+                self.azimuth_angle,
+                self._episode_step_count,
+                self._current_sound,
+                self._current_distractor_sound,
+                self.config.AUDIO.RANDOMIZE_DISTRACTOR_SNR,
+                float(self.config.AUDIO.DISTRACTOR_SNR_DB),
+                float(self.config.AUDIO.DISTRACTOR_SNR_MIN_DB),
+                float(self.config.AUDIO.DISTRACTOR_SNR_MAX_DB),
+            )
+            if joint_index not in self._spectrogram_cache:
+                audiogoal = self.get_current_audiogoal_observation()
+                spectrogram = audiogoal2spectrogram(audiogoal)
+                if (
+                    hasattr(self, "_last_clean_audiogoal")
+                    and self._last_clean_audiogoal is not None
+                    and not getattr(self, "_logged_distractor_spectrogram_delta", False)
+                ):
+                    clean_spectrogram = audiogoal2spectrogram(self._last_clean_audiogoal)
+                    spec_delta = spectrogram.astype(np.float32) - clean_spectrogram.astype(np.float32)
+                    logging.info(
+                        "Distractor spectrogram delta: snr=%.3f dB, clean_abs_mean=%.6e, "
+                        "delta_abs_mean=%.6e, mixed_abs_mean=%.6e",
+                        float(self.config.AUDIO.DISTRACTOR_SNR_DB),
+                        float(np.mean(np.abs(clean_spectrogram))),
+                        float(np.mean(np.abs(spec_delta))),
+                        float(np.mean(np.abs(spectrogram))),
+                    )
+                    self._logged_distractor_spectrogram_delta = True
+                self._spectrogram_cache[joint_index] = spectrogram
+            spectrogram = self._spectrogram_cache[joint_index]
         else:
             joint_index = (self._source_position_index, self._receiver_position_index, self.azimuth_angle, self._episode_step_count)
             if joint_index not in self._spectrogram_cache:

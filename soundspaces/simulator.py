@@ -684,7 +684,7 @@ class SoundSpacesSim(Simulator, ABC):
                                                              ) for channel in range(distractor_rir.shape[-1])])
 
                 distractor_seg = distractor_convolved[:, :sampling_rate].astype(np.float32)
-                snr_db = 10
+                snr_db = 50
                 sig = audiogoal[:, :sampling_rate].astype(np.float32)
 
                 eps = 1e-12

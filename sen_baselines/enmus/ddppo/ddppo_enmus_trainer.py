@@ -520,7 +520,17 @@ class DDPPOTrainer(PPOTrainer):
         ppo_cfg = config.RL.PPO
         
         config.defrost()
-        config.TASK_CONFIG.DATASET.SPlIT = config.EVAL.SPLIT
+        config.TASK_CONFIG.DATASET.SPLIT = config.EVAL.SPLIT
+        logger.info(
+            "Eval audio config: split=%s, has_distractor=%s, randomize_snr=%s, "
+            "distractor_snr_db=%s, distractor_snr_range=(%s, %s)",
+            config.TASK_CONFIG.DATASET.SPLIT,
+            config.TASK_CONFIG.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND,
+            config.TASK_CONFIG.SIMULATOR.AUDIO.RANDOMIZE_DISTRACTOR_SNR,
+            config.TASK_CONFIG.SIMULATOR.AUDIO.DISTRACTOR_SNR_DB,
+            config.TASK_CONFIG.SIMULATOR.AUDIO.DISTRACTOR_SNR_MIN_DB,
+            config.TASK_CONFIG.SIMULATOR.AUDIO.DISTRACTOR_SNR_MAX_DB,
+        )
         if self.config.DISPLAY_RESOLUTION != config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.WIDTH:
             model_resolution = config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.WIDTH
             config.TASK_CONFIG.SIMULATOR.DEPTH_SENSOR.WIDTH = config.TASK_CONFIG.SIMULATOR.RGB_SENSOR.HEIGHT = \

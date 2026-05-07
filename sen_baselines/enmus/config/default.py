@@ -179,6 +179,10 @@ _TC.SIMULATOR.AUDIO.POINTS_FILE = 'points.txt'
 _TC.SIMULATOR.AUDIO.GRAPH_FILE = 'graph.pkl'
 _TC.SIMULATOR.AUDIO.HAS_DISTRACTOR_SOUND = False
 _TC.SIMULATOR.AUDIO.DISTRACTOR_SOUND_DIR = 'data/sounds/1s_all_distractor'
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_DB = 0.0
+_TC.SIMULATOR.AUDIO.RANDOMIZE_DISTRACTOR_SNR = False
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_MIN_DB = 0.0
+_TC.SIMULATOR.AUDIO.DISTRACTOR_SNR_MAX_DB = 60.0
 # -----------------------------------------------------------------------------
 # DistanceToGoal Measure
 # -----------------------------------------------------------------------------
