@@ -224,7 +224,6 @@ class AudioGoalPredictor(nn.Module):
 
         audio_observations = audio_observations.permute(0, 3, 1, 2)
         spec_feat = self.spec_encoder(audio_observations)
-
         depth_feat = self.depth_encoder(depth_observations) 
 
         if self.training and torch.rand(1).item() < self.drop_depth_prob:
@@ -248,7 +247,7 @@ class AudioGoalPredictor(nn.Module):
         distance_logits = torch.sigmoid(distance_logits)
 
         return doa_logits, distance_logits
-        return self.predictor(audio_observations)
+        # return self.predictor(audio_observations)
 
 class AudioGoalPredictor_audio(nn.Module):
     def __init__(self, predict_label=True, predict_location=True):
@@ -330,7 +329,7 @@ class AudioGoalPredictor_audio(nn.Module):
         distance_logits = torch.sigmoid(distance_logits)
 
         return doa_logits, distance_logits
-        return self.predictor(audio_observations)
+        # return self.predictor(audio_observations)
 
 
 
