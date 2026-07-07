@@ -167,7 +167,10 @@ class MapNavEnv(habitat.RLEnv):
                     for observation_rgb in observation['intermediate']:
                         frame = observations_to_image(observation_rgb, info,video_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
                         rgb_frames.append(frame)
-                        audios.append(observation['audiogoal'])
+                        if 'audiogoal' in observation_rgb:
+                            audios.append(observation_rgb['audiogoal'])
+                        else:
+                            audios.append(observation['audiogoal'])
                     del observation['intermediate']
                     
                 
@@ -213,7 +216,10 @@ class MapNavEnv(habitat.RLEnv):
                     frame = observations_to_image(observation_rgb, info,video_map,sim=self._env.sim,sound_bounds=sound_bounds,goal_position=target_goal,pred_position=world_goal)
                     rgb_frames.append(frame)
                     # print(len(rgb_frames))
-                    audios.append(observation['audiogoal'])
+                    if 'audiogoal' in observation_rgb:
+                        audios.append(observation_rgb['audiogoal'])
+                    else:
+                        audios.append(observation['audiogoal'])
                 del observation['intermediate']
 
 

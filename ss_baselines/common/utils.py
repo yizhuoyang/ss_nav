@@ -186,12 +186,47 @@ def ensure_2T(audio: np.ndarray) -> np.ndarray:
     """Return (2,T) float32. Accept (2,T) or (T,2)."""
     a = np.asarray(audio)
     if a.ndim == 1:
-        raise ValueError("audio is (T,), but stereo (2,T) is required.")
+        a = np.stack([a, a], axis=0)
+    elif a.ndim > 2:
+        a = np.squeeze(a)
+        if a.ndim == 1:
+            a = np.stack([a, a], axis=0)
+    if np.issubdtype(a.dtype, np.integer):
+        max_value = float(np.iinfo(a.dtype).max)
+        a = a.astype(np.float32) / max_value
+    else:
+        a = a.astype(np.float32)
     if a.shape[0] == 2:
-        return a.astype(np.float32)
+        return a
     if a.shape[-1] == 2:
-        return a.T.astype(np.float32)
+        return a.T
     raise ValueError(f"Unsupported audio shape {a.shape}, expected (2,T) or (T,2).")
+
+
+def _slice_audio_for_video_frame(audio: np.ndarray, frame_index: int, seg_len: int, fps: int) -> np.ndarray:
+    """Return the audio window used by one video frame as (2, seg_len)."""
+    a = ensure_2T(audio)
+    if a.shape[1] == 0:
+        return np.zeros((2, seg_len), dtype=np.float32)
+
+    start = (frame_index % max(1, int(fps))) * seg_len
+    if start >= a.shape[1]:
+        start = 0
+    a_seg = a[:, start:start + seg_len]
+    if a_seg.shape[1] < seg_len:
+        a_seg = np.pad(a_seg, ((0, 0), (0, seg_len - a_seg.shape[1])), mode="constant")
+    return a_seg.astype(np.float32, copy=False)
+
+
+def _normalize_audio_track(audio_T2: np.ndarray, peak: float = 0.95) -> np.ndarray:
+    """Keep moviepy/ffmpeg input in a valid float range without changing silence."""
+    if audio_T2.size == 0:
+        return audio_T2.astype(np.float32)
+    audio_T2 = np.nan_to_num(audio_T2.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    max_abs = float(np.max(np.abs(audio_T2)))
+    if max_abs > peak:
+        audio_T2 = audio_T2 * (peak / (max_abs + 1e-12))
+    return np.clip(audio_T2, -peak, peak).astype(np.float32)
 
 
 def make_stereo_waveform_panel(
@@ -291,16 +326,13 @@ def images_to_video_with_stereo_audio_and_top_vis(
     seg_len = int(sr * (1.0 / fps))
 
     out_frames = []
-    audio_clips = []
+    audio_segments = []
 
     for i, frame in enumerate(images):
         frame_rgb = frame.copy()
         H, W = frame_rgb.shape[:2]
 
-        a = ensure_2T(audios[i])  # (2,T)
-        a_seg = a[:, :seg_len]
-        if a_seg.shape[1] < seg_len:
-            a_seg = np.pad(a_seg, ((0, 0), (0, seg_len - a_seg.shape[1])), mode="constant")
+        a_seg = _slice_audio_for_video_frame(audios[i], i, seg_len, fps)
 
         # ---- top waveform panel (match width W) ----
         panel_rgb = make_stereo_waveform_panel(
@@ -315,14 +347,12 @@ def images_to_video_with_stereo_audio_and_top_vis(
         merged = np.concatenate([panel_rgb, frame_rgb], axis=0)  # stack vertically
         out_frames.append(merged)
 
-        # ---- audio clip (stereo) ----
-        a_T2 = (a_seg * float(multiplier)).astype(np.float32).T  # (T,2) for moviepy
-        clip = AudioArrayClip(a_T2, fps=sr).set_start((1.0 / fps) * i)
-        audio_clips.append(clip)
+        audio_segments.append(a_seg.T)
 
-    composite_audio = CompositeAudioClip(audio_clips)
+    audio_track = np.concatenate(audio_segments, axis=0) * float(multiplier)
+    audio_track = _normalize_audio_track(audio_track)
     video_clip = mpy.ImageSequenceClip(out_frames, fps=fps)
-    video_with_audio = video_clip.set_audio(composite_audio)
+    video_with_audio = video_clip.set_audio(AudioArrayClip(audio_track, fps=sr))
 
     out_path = os.path.join(output_dir, video_name)
     video_with_audio.write_videofile(out_path, fps=fps)
@@ -1029,4 +1059,3 @@ def observations_to_image(observation, info,sound_map=None,sim=None,sound_bounds
         render_frame = np.concatenate((render_frame, top_down_map), axis=1)
 
     return render_frame
-
